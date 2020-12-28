@@ -19,11 +19,13 @@ import net.mamoe.mirai.contact.ContactOrBot
 import net.mamoe.mirai.contact.Friend
 import net.mamoe.mirai.contact.Group
 import net.mamoe.mirai.contact.Member
+import net.mamoe.mirai.message.data.MessageSource.Key.isAboutFriend
+import net.mamoe.mirai.message.data.MessageSource.Key.isAboutGroup
+import net.mamoe.mirai.message.data.MessageSource.Key.isAboutTemp
+import net.mamoe.mirai.message.data.MessageSource.Key.quote
+import net.mamoe.mirai.message.data.MessageSource.Key.recall
 import net.mamoe.mirai.utils.MiraiExperimentalApi
 import net.mamoe.mirai.utils.currentTimeSeconds
-import kotlin.jvm.JvmMultifileClass
-import kotlin.jvm.JvmName
-import kotlin.jvm.JvmSynthetic
 
 /**
  * 将在线消息源转换为离线消息源.
@@ -52,19 +54,19 @@ public fun MessageSource.copyAmend(
  * 仅于 [copyAmend] 中修改 [MessageSource]
  */
 public interface MessageSourceAmender {
-    public var kind: OfflineMessageSource.Kind
+    public var kind: MessageSourceKind
     public var fromUin: Long
     public var targetUin: Long
-    public var id: Int
+    public var ids: IntArray
     public var time: Int
-    public var internalId: Int
+    public var internalIds: IntArray
 
     public var originalMessage: MessageChain
 
-    /** 从另一个 [MessageSource] 中复制 [id], [internalId], [time]*/
+    /** 从另一个 [MessageSource] 中复制 [ids], [internalIds], [time]*/
     public fun metadataFrom(another: MessageSource) {
-        this.id = another.id
-        this.internalId = another.internalId
+        this.ids = another.ids
+        this.internalIds = another.internalIds
         this.time = another.time
     }
 }
@@ -81,9 +83,9 @@ public interface MessageSourceAmender {
  * ### 参数
  * 一个 [OfflineMessageSource] 须要以下参数:
  * - 发送人和发送目标: 通过 [MessageSourceBuilder.sendTo] 设置
- * - 消息元数据 (即 [MessageSource.id], [MessageSource.internalId], [MessageSource.time])
+ * - 消息元数据 (即 [MessageSource.ids], [MessageSource.internalIds], [MessageSource.time])
  *   元数据用于 [撤回][MessageSource.recall], [引用回复][MessageSource.quote], 和官方客户端定位原消息.
- *   可通过 [MessageSourceBuilder.id], [MessageSourceBuilder.time], [MessageSourceBuilder.internalId] 设置
+ *   可通过 [MessageSourceBuilder.ids], [MessageSourceBuilder.time], [MessageSourceBuilder.internalIds] 设置
  *   可通过 [MessageSourceBuilder.metadata] 从另一个 [MessageSource] 复制
  * - 消息内容: 通过 [MessageSourceBuilder.messages] 设置
  *
@@ -95,7 +97,7 @@ public interface MessageSourceAmender {
  * ```
  * bot.buildMessageSource {
  *     bot sendTo target // 指定发送人和发送目标
- *     metadata(source) // 从另一个消息源复制 id, internalId, time
+ *     metadata(source) // 从另一个消息源复制 ids, internalIds, time
  *
  *     messages { // 指定消息内容
  *         +"hi"
@@ -108,13 +110,13 @@ public interface MessageSourceAmender {
 public fun Bot.buildMessageSource(block: MessageSourceBuilder.() -> Unit): MessageSource {
     val builder = MessageSourceBuilderImpl().apply(block)
     return Mirai.constructMessageSource(
-        this,
+        this.id,
         builder.kind ?: error("You must call `Contact.sendTo(Contact)` when `buildMessageSource`"),
         builder.fromUin,
         builder.targetUin,
-        builder.id,
+        builder.ids,
         builder.time,
-        builder.internalId,
+        builder.internalIds,
         builder.originalMessages.build()
     )
 }
@@ -123,30 +125,30 @@ public fun Bot.buildMessageSource(block: MessageSourceBuilder.() -> Unit): Messa
  * @see buildMessageSource
  */
 public abstract class MessageSourceBuilder {
-    internal abstract var kind: OfflineMessageSource.Kind?
+    internal abstract var kind: MessageSourceKind?
     internal abstract var fromUin: Long
     internal abstract var targetUin: Long
 
-    internal abstract var id: Int
+    internal abstract var ids: IntArray
     internal abstract var time: Int
-    internal abstract var internalId: Int
+    internal abstract var internalIds: IntArray
 
     @PublishedApi
     internal val originalMessages: MessageChainBuilder = MessageChainBuilder()
 
     public fun time(from: MessageSource): MessageSourceBuilder = apply { this.time = from.time }
-    public val now: Int get() = currentTimeSeconds.toInt()
+    public val now: Int get() = currentTimeSeconds().toInt()
     public fun time(value: Int): MessageSourceBuilder = apply { this.time = value }
 
-    public fun internalId(from: MessageSource): MessageSourceBuilder = apply { this.internalId = from.internalId }
-    public fun internalId(value: Int): MessageSourceBuilder = apply { this.internalId = value }
+    public fun internalId(from: MessageSource): MessageSourceBuilder = apply { this.internalIds = from.internalIds }
+    public fun internalId(vararg value: Int): MessageSourceBuilder = apply { this.internalIds = value }
 
-    public fun id(from: MessageSource): MessageSourceBuilder = apply { this.id = from.id }
-    public fun id(value: Int): MessageSourceBuilder = apply { this.id = value }
+    public fun id(from: MessageSource): MessageSourceBuilder = apply { this.ids = from.ids }
+    public fun id(vararg value: Int): MessageSourceBuilder = apply { this.ids = value }
 
 
     /**
-     * 从另一个 [MessageSource] 复制 [id], [time], [internalId].
+     * 从另一个 [MessageSource] 复制 [ids], [time], [internalIds].
      * 这三个数据决定官方客户端能 "定位" 到的原消息
      */
     public fun metadata(from: MessageSource): MessageSourceBuilder = apply {
@@ -160,11 +162,11 @@ public abstract class MessageSourceBuilder {
      */
     public fun allFrom(source: MessageSource): MessageSourceBuilder {
         this.kind = determineKind(source)
-        this.id = source.id
+        this.ids = source.ids
         this.time = source.time
         this.fromUin = source.fromId
         this.targetUin = source.targetId
-        this.internalId = source.internalId
+        this.internalIds = source.internalIds
         this.originalMessages.addAll(source.originalMessage)
         return this
     }
@@ -211,31 +213,31 @@ public abstract class MessageSourceBuilder {
 
 
 internal class MessageSourceBuilderImpl : MessageSourceBuilder() {
-    override var kind: OfflineMessageSource.Kind? = null
+    override var kind: MessageSourceKind? = null
     override var fromUin: Long = 0
     override var targetUin: Long = 0
 
-    override var id: Int = 0
-    override var time: Int = currentTimeSeconds.toInt()
-    override var internalId: Int = 0
+    override var ids: IntArray = intArrayOf()
+    override var time: Int = currentTimeSeconds().toInt()
+    override var internalIds: IntArray = intArrayOf()
 
     @JvmSynthetic
     override fun ContactOrBot.sendTo(target: ContactOrBot): MessageSourceBuilder {
         fromUin = if (this is Group) {
-            Group.calculateGroupUinByGroupCode(this.id)
+            Mirai.calculateGroupUinByGroupCode(this.id)
         } else this.id
 
         targetUin = if (target is Group) {
-            Group.calculateGroupUinByGroupCode(target.id)
+            Mirai.calculateGroupUinByGroupCode(target.id)
         } else target.id
 
         check(this != target) { "sender and target mustn't be the same" }
 
         kind = when {
-            this is Group || target is Group -> OfflineMessageSource.Kind.GROUP
-            this is Member || target is Member -> OfflineMessageSource.Kind.TEMP
-            this is Bot && target is Friend -> OfflineMessageSource.Kind.FRIEND
-            this is Friend && target is Bot -> OfflineMessageSource.Kind.FRIEND
+            this is Group || target is Group -> MessageSourceKind.GROUP
+            this is Member || target is Member -> MessageSourceKind.TEMP
+            this is Bot && target is Friend -> MessageSourceKind.FRIEND
+            this is Friend && target is Bot -> MessageSourceKind.FRIEND
             else -> throw IllegalArgumentException("Cannot determine source kind for sender $this and target $target")
         }
         return this@MessageSourceBuilderImpl
@@ -250,7 +252,7 @@ internal fun MessageSource.toMutableOffline(): MutableOfflineMessageSourceByOnli
 internal class MutableOfflineMessageSourceByOnline(
     origin: MessageSource
 ) : OfflineMessageSource(), MessageSourceAmender {
-    override var kind: Kind = determineKind(origin)
+    override var kind: MessageSourceKind = determineKind(origin)
     override var fromUin: Long
         get() = fromId
         set(value) {
@@ -261,20 +263,20 @@ internal class MutableOfflineMessageSourceByOnline(
         set(value) {
             targetId = value
         }
-    override var bot: Bot = origin.bot
-    override var id: Int = origin.id
-    override var internalId: Int = origin.internalId
+    override val botId: Long = origin.botId
+    override var ids: IntArray = origin.ids
+    override var internalIds: IntArray = origin.internalIds
     override var time: Int = origin.time
     override var fromId: Long = origin.fromId
     override var targetId: Long = origin.targetId
     override var originalMessage: MessageChain = origin.originalMessage
 }
 
-private fun determineKind(source: MessageSource): OfflineMessageSource.Kind {
+private fun determineKind(source: MessageSource): MessageSourceKind {
     return when {
-        source.isAboutGroup() -> OfflineMessageSource.Kind.GROUP
-        source.isAboutFriend() -> OfflineMessageSource.Kind.FRIEND
-        source.isAboutTemp() -> OfflineMessageSource.Kind.TEMP
+        source.isAboutGroup() -> MessageSourceKind.GROUP
+        source.isAboutFriend() -> MessageSourceKind.FRIEND
+        source.isAboutTemp() -> MessageSourceKind.TEMP
         else -> error("stub")
     }
 }
@@ -282,16 +284,11 @@ private fun determineKind(source: MessageSource): OfflineMessageSource.Kind {
 internal class OfflineMessageSourceByOnline(
     private val onlineMessageSource: OnlineMessageSource
 ) : OfflineMessageSource() {
-    override val kind: Kind
-        get() = when {
-            onlineMessageSource.isAboutGroup() -> Kind.GROUP
-            onlineMessageSource.isAboutFriend() -> Kind.FRIEND
-            onlineMessageSource.isAboutTemp() -> Kind.TEMP
-            else -> error("stub")
-        }
-    override val bot: Bot get() = onlineMessageSource.bot
-    override val id: Int get() = onlineMessageSource.id
-    override val internalId: Int get() = onlineMessageSource.internalId
+    override val kind: MessageSourceKind
+        get() = onlineMessageSource.kind
+    override val botId: Long get() = onlineMessageSource.botId
+    override val ids: IntArray get() = onlineMessageSource.ids
+    override val internalIds: IntArray get() = onlineMessageSource.internalIds
     override val time: Int get() = onlineMessageSource.time
     override val fromId: Long get() = onlineMessageSource.fromId
     override val targetId: Long get() = onlineMessageSource.targetId

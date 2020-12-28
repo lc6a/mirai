@@ -20,12 +20,9 @@ import kotlinx.io.core.readUByte
 import kotlinx.io.core.readUInt
 import net.mamoe.mirai.JavaFriendlyAPI
 import net.mamoe.mirai.contact.MemberPermission
-import net.mamoe.mirai.data.MemberInfo
 import net.mamoe.mirai.event.events.*
 import net.mamoe.mirai.internal.QQAndroidBot
-import net.mamoe.mirai.internal.contact.GroupImpl
-import net.mamoe.mirai.internal.contact.MemberImpl
-import net.mamoe.mirai.internal.contact.checkIsMemberImpl
+import net.mamoe.mirai.internal.contact.*
 import net.mamoe.mirai.internal.message.contextualBugReportException
 import net.mamoe.mirai.internal.network.MultiPacketByIterable
 import net.mamoe.mirai.internal.network.Packet
@@ -36,7 +33,7 @@ import net.mamoe.mirai.internal.network.protocol.packet.OutgoingPacket
 import net.mamoe.mirai.internal.network.protocol.packet.buildResponseUniPacket
 import net.mamoe.mirai.internal.utils._miraiContentToString
 import net.mamoe.mirai.internal.utils.io.serialization.readProtoBuf
-import net.mamoe.mirai.internal.utils.read
+import net.mamoe.mirai.utils.*
 
 
 internal object OnlinePushPbPushTransMsg :
@@ -100,7 +97,7 @@ internal object OnlinePushPbPushTransMsg :
                                         )
                                     )
                             } else {
-                                val member = group[from] as MemberImpl
+                                val member = group[from] as NormalMemberImpl
                                 if (member.permission != MemberPermission.MEMBER) {
                                     results.add(
                                         MemberPermissionChangeEvent(
@@ -125,24 +122,20 @@ internal object OnlinePushPbPushTransMsg :
                                     )
                                 }
                             } else {
-                                val newOwner = group.getOrNull(to) ?: group.newMember(object : MemberInfo {
-                                    override val nameCard: String
-                                        get() = ""
-                                    override val permission: MemberPermission
-                                        get() = MemberPermission.OWNER
-                                    override val specialTitle: String
-                                        get() = ""
-                                    override val muteTimestamp: Int
-                                        get() = 0
-                                    override val uin: Long
-                                        get() = to
-                                    override val nick: String
-                                        get() = ""
-                                    override val remark: String
-                                        get() = ""
-                                }).also { owner ->
+                                val newOwner = (group[to] ?: group.newMember(
+                                    MemberInfoImpl(
+                                        to,
+                                        "",
+                                        MemberPermission.OWNER,
+                                        "",
+                                        "",
+                                        "",
+                                        0,
+                                        null
+                                    )
+                                )).also { owner ->
                                     owner.checkIsMemberImpl().permission = MemberPermission.OWNER
-                                    group.members.delegate.addLast(owner)
+                                    group.members.delegate.add(owner)
                                     results.add(MemberJoinEvent.Retrieve(owner))
                                 }
                                 if (newOwner.permission != MemberPermission.OWNER) {
@@ -186,7 +179,7 @@ internal object OnlinePushPbPushTransMsg :
                                         newPermission
                                     )
                                 } else {
-                                    val member = group[target] as MemberImpl
+                                    val member = group[target] as NormalMemberImpl
                                     if (member.permission == newPermission) {
                                         return null
                                     }
@@ -230,7 +223,7 @@ internal object OnlinePushPbPushTransMsg :
                                     bot.groups.delegate.remove(group)
                                 }
                             } else {
-                                val member = group.getOrNull(target) as? MemberImpl ?: return null
+                                val member = group.get(target) as? NormalMemberImpl ?: return null
                                 return MemberLeaveEvent.Quit(member.also {
                                     member.cancel(CancellationException("Leaved actively"))
                                     group.members.delegate.remove(member)
@@ -239,12 +232,13 @@ internal object OnlinePushPbPushTransMsg :
                         }
                         3, 0x83 -> bot.getGroupByUin(groupUin).let { group ->
                             if (target == bot.id) {
-                                return BotLeaveEvent.Kick(group.members[operator]).also {
+                                val member = group.members[operator] ?: return@let null
+                                return BotLeaveEvent.Kick(member).also {
                                     group.cancel(CancellationException("Being kicked"))
                                     bot.groups.delegate.remove(group)
                                 }
                             } else {
-                                val member = group.getOrNull(target) as? MemberImpl ?: return null
+                                val member = group.get(target) as? NormalMemberImpl ?: return null
                                 return MemberLeaveEvent.Kick(member.also {
                                     member.cancel(CancellationException("Being kicked"))
                                     group.members.delegate.remove(member)

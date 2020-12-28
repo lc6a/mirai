@@ -7,14 +7,10 @@
  *  https://github.com/mamoe/mirai/blob/master/LICENSE
  */
 
-@file:JvmName("Utils")
-@file:JvmMultifileClass
 @file:Suppress("MemberVisibilityCanBePrivate")
 
 package net.mamoe.mirai.utils
 
-import java.io.ByteArrayOutputStream
-import java.io.PrintStream
 import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.*
@@ -40,11 +36,12 @@ import java.util.*
  *
  * @param isColored 是否添加 ANSI 颜色
  *
- * @see DefaultLogger
+ * @see MiraiLogger.create
  * @see SingleFileLogger 使用单一文件记录日志
  * @see DirectoryLogger 在一个目录中按日期存放文件记录日志, 自动清理过期日志
  */
-public actual open class PlatformLogger @JvmOverloads constructor(
+@MiraiInternalApi
+public actual open class PlatformLogger constructor(
     public override val identity: String? = "Mirai",
     /**
      * 日志输出. 不会自动添加换行
@@ -53,11 +50,11 @@ public actual open class PlatformLogger @JvmOverloads constructor(
     public val isColored: Boolean = true
 ) : MiraiLoggerPlatformBase() {
     public actual constructor(identity: String?) : this(identity, ::println)
+    public actual constructor(identity: String?, output: (String) -> Unit) : this(identity, output, true)
 
     /**
      * 输出一条日志. [message] 末尾可能不带换行符.
      */
-    @SinceMirai("1.1.0")
     protected open fun printLog(message: String?, priority: SimpleLogger.LogPriority) {
         if (isColored) output("${priority.color}$currentTimeFormatted ${priority.simpleName}/$identity: $message${Color.RESET}")
         else output("$currentTimeFormatted ${priority.simpleName}/$identity: $message")
@@ -66,7 +63,6 @@ public actual open class PlatformLogger @JvmOverloads constructor(
     /**
      * 获取指定 [SimpleLogger.LogPriority] 的颜色
      */
-    @SinceMirai("1.1.0")
     protected open val SimpleLogger.LogPriority.color: Color
         get() = when (this) {
             SimpleLogger.LogPriority.VERBOSE -> Color.RESET
@@ -106,14 +102,11 @@ public actual open class PlatformLogger @JvmOverloads constructor(
         if (e != null) debug((message ?: e.toString()) + "\n${e.stackTraceString}")
         else debug(message.toString())
     }
-
-    @SinceMirai("1.1.0")
     protected open val timeFormat: DateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.SIMPLIFIED_CHINESE)
 
     private val currentTimeFormatted get() = timeFormat.format(Date())
 
     @MiraiExperimentalApi("This is subject to change.")
-    @SinceMirai("1.1.0")
     protected enum class Color(private val format: String) {
         RESET("\u001b[0m"),
 

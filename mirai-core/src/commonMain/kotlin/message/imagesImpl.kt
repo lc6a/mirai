@@ -13,22 +13,44 @@ package net.mamoe.mirai.internal.message
 
 import kotlinx.serialization.Serializable
 import net.mamoe.mirai.Bot
+import net.mamoe.mirai.IMirai
 import net.mamoe.mirai.contact.Contact
 import net.mamoe.mirai.contact.Group
-import net.mamoe.mirai.internal.MiraiImpl
 import net.mamoe.mirai.internal.network.protocol.data.proto.ImMsgBody
-import net.mamoe.mirai.internal.utils.hexToBytes
-import net.mamoe.mirai.message.data.*
-import net.mamoe.mirai.utils.ExternalImage
+import net.mamoe.mirai.message.data.FriendImage
+import net.mamoe.mirai.message.data.GroupImage
+import net.mamoe.mirai.message.data.Image
+import net.mamoe.mirai.message.data.Image.Key.FRIEND_IMAGE_ID_REGEX_1
+import net.mamoe.mirai.message.data.Image.Key.FRIEND_IMAGE_ID_REGEX_2
+import net.mamoe.mirai.message.data.Image.Key.GROUP_IMAGE_ID_REGEX
+import net.mamoe.mirai.message.data.md5
+import net.mamoe.mirai.utils.ExternalResource
 import net.mamoe.mirai.utils.MiraiExperimentalApi
-import net.mamoe.mirai.utils.SinceMirai
-import kotlin.jvm.JvmSynthetic
+import net.mamoe.mirai.utils.generateImageId
+import net.mamoe.mirai.utils.hexToBytes
+
+/*
+ * ImgType:
+ *  JPG:    1000
+ *  PNG:    1001
+ *  WEBP:   1002
+ *  BMP:    1005
+ *  GIG:    2000 // gig? gif?
+ *  APNG:   2001
+ *  SHARPP: 1004
+ */
 
 internal class OnlineGroupImageImpl(
     internal val delegate: ImMsgBody.CustomFace
 ) : @Suppress("DEPRECATION")
 OnlineGroupImage() {
-    override val imageId: String = ExternalImage.generateImageId(delegate.md5)
+    override val imageId: String = generateImageId(
+        delegate.md5,
+        delegate.filePath.substringAfterLast('.')
+    ).takeIf {
+        GROUP_IMAGE_ID_REGEX.matches(it)
+    } ?: generateImageId(delegate.md5)
+
     override val originUrl: String
         get() = if (delegate.origUrl.isBlank()) {
             "http://gchat.qpic.cn/gchatpic_new/0/0-0-${
@@ -111,6 +133,10 @@ internal abstract class AbstractImage : Image { // make sealed in 1.3.0 ?
 
     final override fun toString(): String = _stringValue!!
     final override fun contentToString(): String = "[图片]"
+
+    override fun appendMiraiCode(builder: StringBuilder) {
+        builder.append("[mirai:image:").append(imageId).append("]")
+    }
 }
 
 internal interface ConstOriginUrlAware : Image {
@@ -128,52 +154,33 @@ internal interface SuspendDeferredOriginUrlAware : Image {
 /**
  * 由 [ExternalImage] 委托的 [Image] 类型.
  */
-@SinceMirai("1.1.0")
 @MiraiExperimentalApi("Will be renamed to OfflineImage on 1.2.0")
 @Suppress("DEPRECATION_ERROR")
 internal class ExperimentalDeferredImage internal constructor(
-    @Suppress("CanBeParameter") private val externalImage: ExternalImage // for future use
+    @Suppress("CanBeParameter") private val externalImage: ExternalResource // for future use
 ) : AbstractImage(), SuspendDeferredOriginUrlAware {
     override suspend fun getUrl(bot: Bot): String {
         TODO()
     }
 
-    @Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")
-    override val imageId: String = externalImage.calculateImageResourceId()
+    override val imageId: String = externalImage.calculateResourceId()
 }
-
-internal val firstOnlineBotInstance: Bot get() = Bot.botInstancesSequence.firstOrNull() ?: error("No Bot available")
 
 @Suppress("EXPOSED_SUPER_INTERFACE")
 internal interface OnlineImage : Image, ConstOriginUrlAware {
-    companion object Key : Message.Key<OnlineImage> {
-        override val typeName: String get() = "OnlineImage"
-    }
-
     override val originUrl: String
 }
 
 /**
  * 离线的图片, 即为客户端主动上传到服务器而获得的 [Image] 实例.
- * 不能直接获取它在服务器上的链接. 需要通过 [Bot.queryImageUrl] 查询
+ * 不能直接获取它在服务器上的链接. 需要通过 [IMirai.queryImageUrl] 查询
  *
  * 一般由 [Contact.uploadImage] 得到
  */
-internal interface OfflineImage : Image {
-    companion object Key : Message.Key<OfflineImage> {
-        override val typeName: String get() = "OfflineImage"
-    }
-}
-
-@JvmSynthetic
-internal suspend fun OfflineImage.queryUrl(): String {
-    @Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")
-    val bot = Bot._instances.peekFirst()?.get() ?: error("No Bot available to query image url")
-    return MiraiImpl.queryImageUrl(bot, this)
-}
+internal interface OfflineImage : Image
 
 /**
- * 通过 [Group.uploadImage] 上传得到的 [GroupImage]. 它的链接需要查询 [Bot.queryImageUrl]
+ * 通过 [Group.uploadImage] 上传得到的 [GroupImage]. 它的链接需要查询 [IMirai.queryImageUrl]
  *
  * @param imageId 参考 [Image.imageId]
  */
@@ -204,7 +211,7 @@ internal data class OfflineGroupImage(
 internal abstract class OnlineGroupImage : GroupImage(), OnlineImage
 
 /**
- * 通过 [Group.uploadImage] 上传得到的 [GroupImage]. 它的链接需要查询 [Bot.queryImageUrl]
+ * 通过 [Group.uploadImage] 上传得到的 [GroupImage]. 它的链接需要查询 [IMirai.queryImageUrl]
  *
  * @param imageId 参考 [Image.imageId]
  */

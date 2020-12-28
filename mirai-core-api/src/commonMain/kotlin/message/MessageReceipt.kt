@@ -11,12 +11,16 @@
 
 package net.mamoe.mirai.message
 
+import kotlinx.coroutines.Deferred
+import net.mamoe.kjbb.JvmBlockingBridge
+import net.mamoe.mirai.Bot
 import net.mamoe.mirai.IMirai
 import net.mamoe.mirai.Mirai
 import net.mamoe.mirai.contact.*
 import net.mamoe.mirai.message.data.*
-import net.mamoe.mirai.utils.MiraiExperimentalApi
-import kotlin.jvm.JvmSynthetic
+import net.mamoe.mirai.message.data.MessageSource.Key.quote
+import net.mamoe.mirai.message.data.MessageSource.Key.recallIn
+import net.mamoe.mirai.utils.MiraiInternalApi
 
 /**
  * 发送消息后得到的回执. 可用于撤回, 引用回复等.
@@ -26,16 +30,16 @@ import kotlin.jvm.JvmSynthetic
  *
  * @see quote 引用这条消息. 即引用机器人自己发出去的消息
  * @see quoteReply 引用并回复这条消息.
- * @see recall 撤回这条消息
+ * @see recallMessage 撤回这条消息
  *
  * @see Group.sendMessage 发送群消息, 返回回执（此对象）
  * @see User.sendMessage 发送群消息, 返回回执（此对象）
  * @see Member.sendMessage 发送临时消息, 返回回执（此对象）
  *
- * @see MessageReceipt.sourceId 源 id
+ * @see MessageReceipt.sourceIds 源 ids
  * @see MessageReceipt.sourceTime 源时间
  */
-public open class MessageReceipt<out C : Contact> @MiraiExperimentalApi("The constructor is subject to change.") constructor(
+public open class MessageReceipt<out C : Contact> @MiraiInternalApi constructor(
     /**
      * 指代发送出去的消息.
      */
@@ -44,81 +48,84 @@ public open class MessageReceipt<out C : Contact> @MiraiExperimentalApi("The con
      * 发送目标, 为 [Group] 或 [Friend] 或 [Member]
      */
     public val target: C,
-
-    /**
-     * @see Group.botAsMember
-     */
-    @MiraiExperimentalApi("This is subject to change.")
-    public val botAsMember: Member?
 ) {
     /**
      * 是否为发送给群的消息的回执
      */
     public val isToGroup: Boolean get() = target is Group
+
+    /**
+     * 撤回这条消息.
+     *
+     * @see IMirai.recallMessage
+     */
+    @JvmBlockingBridge
+    public suspend inline fun recall() {
+        return Mirai.recallMessage(target.bot, source)
+    }
+
+    /**
+     * 在一段时间后撤回这条消息.
+     *
+     * @see IMirai.recallMessage
+     */
+    @Suppress("DeferredIsResult")
+    public fun recallIn(millis: Long): Deferred<Unit> = this.source.recallIn(millis)
+
+    /**
+     * 引用这条消息.
+     * @see MessageSource.quote 引用一条消息
+     */
+    public fun quote(): QuoteReply = this.source.quote()
+
+    /**
+     * 引用这条消息并回复.
+     * @see MessageSource.quote 引用一条消息
+     */
+    @JvmBlockingBridge
+    public suspend inline fun quoteReply(message: Message): MessageReceipt<C> {
+        @Suppress("UNCHECKED_CAST")
+        return target.sendMessage(this.quote() + message) as MessageReceipt<C>
+    }
+
+    /**
+     * 引用这条消息并回复.
+     * @see MessageSource.quote 引用一条消息
+     */
+    @JvmBlockingBridge
+    public suspend inline fun quoteReply(message: String): MessageReceipt<C> {
+        return this.quoteReply(PlainText(message))
+    }
+
+    public companion object
 }
 
 /**
- * 撤回这条消息. [recall] 或 [recallIn] 只能被调用一次.
- *
- * @see IMirai.recall
- * @throws IllegalStateException 当此消息已经被撤回或正计划撤回时
+ * 获取相关 [Bot]
  */
-public suspend inline fun MessageReceipt<*>.recall() {
-    return Mirai.recall(target.bot, source)
-}
+public inline val MessageReceipt<*>.bot: Bot
+    get() = target.bot
 
 /**
- * 引用这条消息.
- * @see MessageChain.quote 引用一条消息
+ * 获取源消息 [MessageSource.ids]
  */
-@JvmSynthetic
-public inline fun MessageReceipt<*>.quote(): QuoteReply = this.source.quote()
+public inline val MessageReceipt<*>.sourceIds: IntArray
+    get() = this.source.ids
 
 /**
- * 引用这条消息并回复.
- * @see MessageChain.quote 引用一条消息
+ * 获取源消息 [MessageSource.internalIds]
  */
-@JvmSynthetic
-public suspend inline fun <C : Contact> MessageReceipt<C>.quoteReply(message: Message): MessageReceipt<C> {
-    @Suppress("UNCHECKED_CAST")
-    return target.sendMessage(this.quote() + message) as MessageReceipt<C>
-}
-
-/**
- * 引用这条消息并回复.
- * @see MessageChain.quote 引用一条消息
- */
-@JvmSynthetic
-public suspend inline fun <C : Contact> MessageReceipt<C>.quoteReply(message: String): MessageReceipt<C> {
-    return this.quoteReply(PlainText(message))
-}
-
-
-/**
- * 获取源消息 [MessageSource.id]
- *
- * @see MessageSource.id
- */
-@get:JvmSynthetic
-public inline val MessageReceipt<*>.sourceId: Int
-    get() = this.source.id
-
-
-/**
- * 获取源消息 [MessageSource.internalId]
- *
- * @see MessageSource.id
- */
-@get:JvmSynthetic
-public inline val MessageReceipt<*>.sourceInternalId: Int
-    get() = this.source.internalId
+public inline val MessageReceipt<*>.sourceInternalIds: IntArray
+    get() = this.source.internalIds
 
 /**
  * 获取源消息 [MessageSource.time]
- *
- * @see MessageSource.time
  */
-@get:JvmSynthetic
 public inline val MessageReceipt<*>.sourceTime: Int
     get() = this.source.time
 
+/**
+ * 获取源消息 [MessageSource.originalMessage]
+ */
+public inline val MessageReceipt<*>.sourceMessage: MessageChain
+    get() = this.source.originalMessage

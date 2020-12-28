@@ -13,28 +13,26 @@
 package net.mamoe.mirai.contact
 
 import kotlinx.coroutines.CoroutineScope
+import net.mamoe.kjbb.JvmBlockingBridge
 import net.mamoe.mirai.*
 import net.mamoe.mirai.event.events.*
 import net.mamoe.mirai.message.MessageReceipt
 import net.mamoe.mirai.message.data.*
-import net.mamoe.mirai.message.quote
-import net.mamoe.mirai.message.recall
-import net.mamoe.mirai.utils.ExternalImage
-import net.mamoe.mirai.utils.OverFileSizeMaxException
-import net.mamoe.mirai.utils.WeakRefProperty
-import kotlin.jvm.JvmSynthetic
-
+import net.mamoe.mirai.utils.*
+import net.mamoe.mirai.utils.ExternalResource.Companion.sendAsImageTo
+import net.mamoe.mirai.utils.ExternalResource.Companion.uploadAsImage
+import java.io.File
+import java.io.InputStream
 
 /**
  * 联系对象, 即可以与 [Bot] 互动的对象. 包含 [用户][User], 和 [群][Group].
  */
-@Suppress("EXPOSED_SUPER_CLASS")
-public abstract class Contact : ContactOrBot, CoroutineScope {
+public interface Contact : ContactOrBot, CoroutineScope {
     /**
      * 这个联系对象所属 [Bot].
      */
     @WeakRefProperty
-    public abstract val bot: Bot
+    public override val bot: Bot
 
     /**
      * 可以是 QQ 号码或者群号码.
@@ -42,7 +40,7 @@ public abstract class Contact : ContactOrBot, CoroutineScope {
      * @see User.id
      * @see Group.id
      */
-    public abstract override val id: Long
+    public override val id: Long
 
     /**
      * 向这个对象发送消息.
@@ -59,47 +57,118 @@ public abstract class Contact : ContactOrBot, CoroutineScope {
      *
      * @return 消息回执. 可 [引用回复][MessageReceipt.quote]（仅群聊）或 [撤回][MessageReceipt.recall] 这条消息.
      */
-    @JvmSynthetic
-    public abstract suspend fun sendMessage(message: Message): MessageReceipt<Contact>
+    @JvmBlockingBridge
+    public suspend fun sendMessage(message: Message): MessageReceipt<Contact>
 
-    @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE", "VIRTUAL_MEMBER_HIDDEN", "OVERRIDE_BY_INLINE")
-    @kotlin.internal.InlineOnly
-    @JvmSynthetic
-    public suspend inline fun sendMessage(message: String): MessageReceipt<Contact> {
-        return sendMessage(PlainText(message))
-    }
+    /**
+     * 发送纯文本消息
+     * @see sendMessage
+     */
+    @JvmBlockingBridge
+    public suspend fun sendMessage(message: String): MessageReceipt<Contact> = this.sendMessage(message.toPlainText())
 
     /**
      * 上传一个图片以备发送.
+     *
+     * 无论上传是否成功都不会关闭 [resource].
      *
      * @see Image 查看有关图片的更多信息, 如上传图片
      *
      * @see BeforeImageUploadEvent 图片发送前事件, 可拦截.
      * @see ImageUploadEvent 图片发送完成事件, 不可拦截.
      *
+     * @see ExternalResource
+     *
      * @throws EventCancelledException 当发送消息事件被取消时抛出
      * @throws OverFileSizeMaxException 当图片文件过大而被服务器拒绝上传时抛出. (最大大小约为 20 MB, 但 mirai 限制的大小为 30 MB)
      */
-    @JvmSynthetic
-    public abstract suspend fun uploadImage(image: ExternalImage): Image
-
-    public final override fun equals(other: Any?): Boolean = super.equals(other)
-    public final override fun hashCode(): Int = super.hashCode()
+    @JvmBlockingBridge
+    public suspend fun uploadImage(resource: ExternalResource): Image
 
     /**
      * @return "Friend($id)" or "Group($id)" or "Member($id)"
      */
-    public abstract override fun toString(): String
+    public override fun toString(): String
+
+    public companion object {
+        /**
+         * 读取 [InputStream] 到临时文件并将其作为图片发送到指定联系人
+         *
+         * 注意：此函数不会关闭 [imageStream]
+         *
+         * @throws OverFileSizeMaxException
+         * @see FileCacheStrategy
+         */
+        @Throws(OverFileSizeMaxException::class)
+        @JvmStatic
+        @JvmBlockingBridge
+        public suspend fun <C : Contact> C.sendImage(imageStream: InputStream): MessageReceipt<C> =
+            imageStream.sendAsImageTo(this)
+
+        /**
+         * 将文件作为图片发送到指定联系人
+         * @throws OverFileSizeMaxException
+         * @see FileCacheStrategy
+         */
+        @Throws(OverFileSizeMaxException::class)
+        @JvmStatic
+        @JvmBlockingBridge
+        public suspend fun <C : Contact> C.sendImage(file: File): MessageReceipt<C> = file.sendAsImageTo(this)
+
+        /**
+         * 将资源作为单独的图片消息发送给 [this]
+         *
+         * @see Contact.sendMessage 最终调用, 发送消息.
+         */
+        @JvmBlockingBridge
+        @JvmStatic
+        public suspend fun <C : Contact> C.sendImage(resource: ExternalResource): MessageReceipt<C> =
+            resource.sendAsImageTo(this)
+
+
+        /**
+         * 读取 [InputStream] 到临时文件并将其作为图片上传, 但不发送
+         *
+         * 注意：本函数不会关闭流
+         *
+         * @throws OverFileSizeMaxException
+         */
+        @Throws(OverFileSizeMaxException::class)
+        @JvmStatic
+        @JvmBlockingBridge
+        public suspend fun Contact.uploadImage(imageStream: InputStream): Image =
+            imageStream.uploadAsImage(this@uploadImage)
+
+        /**
+         * 将文件作为图片上传, 但不发送
+         * @throws OverFileSizeMaxException
+         */
+        @Throws(OverFileSizeMaxException::class)
+        @JvmStatic
+        @JvmBlockingBridge
+        public suspend fun Contact.uploadImage(file: File): Image = file.uploadAsImage(this)
+
+        /**
+         * 将文件作为图片上传, 但不发送
+         * @throws OverFileSizeMaxException
+         */
+        @Throws(OverFileSizeMaxException::class)
+        @JvmStatic
+        @JvmBlockingBridge
+        @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE", "EXTENSION_SHADOWED_BY_MEMBER")
+        @kotlin.internal.LowPriorityInOverloadResolution // for better Java API
+        public suspend fun Contact.uploadImage(resource: ExternalResource): Image = this.uploadImage(resource)
+    }
 }
 
 /**
- * @see IMirai.recall
+ * @see IMirai.recallMessage
  */
 @JvmSynthetic
-public suspend inline fun Contact.recall(source: MessageChain): Unit = Mirai.recall(bot, source)
+public suspend inline fun Contact.recallMessage(source: MessageChain): Unit = Mirai.recallMessage(bot, source)
 
 /**
- * @see IMirai.recall
+ * @see IMirai.recallMessage
  */
 @JvmSynthetic
-public suspend inline fun Contact.recall(source: MessageSource): Unit = Mirai.recall(bot, source)
+public suspend inline fun Contact.recallMessage(source: MessageSource): Unit = Mirai.recallMessage(bot, source)

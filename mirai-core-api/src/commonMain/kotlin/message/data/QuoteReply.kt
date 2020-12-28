@@ -13,10 +13,10 @@
 
 package net.mamoe.mirai.message.data
 
+import kotlinx.serialization.Serializable
 import net.mamoe.mirai.Bot
-import kotlin.jvm.JvmMultifileClass
-import kotlin.jvm.JvmName
-import kotlin.jvm.JvmSynthetic
+import net.mamoe.mirai.message.data.MessageSource.Key.recall
+import net.mamoe.mirai.utils.safeCast
 
 
 /**
@@ -35,19 +35,19 @@ import kotlin.jvm.JvmSynthetic
  * 引用回复的原消息内容完全由 [source] 中 [MessageSource.originalMessage] 控制, 客户端不会自行寻找原消息.
  *
  * #### 客户端内跳转
- * 客户端在跳转原消息时, 会通过 [MessageSource.id] 等 metadata
+ * 客户端在跳转原消息时, 会通过 [MessageSource.ids] 等 metadata
  *
  * @see MessageSource 获取有关消息源的更多信息
  */
-public class QuoteReply(public val source: MessageSource) : Message, MessageMetadata, ConstrainSingle<QuoteReply> {
-    public companion object Key : Message.Key<QuoteReply> {
-        public override val typeName: String
-            get() = "QuoteReply"
-    }
+@Serializable
+public data class QuoteReply(public val source: MessageSource) : Message, MessageMetadata, ConstrainSingle {
+    public companion object Key : AbstractMessageKey<QuoteReply>({ it.safeCast() })
 
-    public override val key: Message.Key<QuoteReply> get() = Key
+    public override val key: MessageKey<QuoteReply> get() = Key
 
-    public override fun toString(): String = "[mirai:quote:${source.id},${source.internalId}]"
+    public override fun toString(): String =
+        "[mirai:quote:${source.ids.contentToString()},${source.internalIds.contentToString()}]"
+
     public override fun equals(other: Any?): Boolean = other is QuoteReply && other.source == this.source
     public override fun hashCode(): Int = source.hashCode()
 }

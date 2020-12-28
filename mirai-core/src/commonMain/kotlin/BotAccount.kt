@@ -10,19 +10,31 @@
 
 package net.mamoe.mirai.internal
 
-import kotlinx.io.core.toByteArray
-import net.mamoe.mirai.internal.utils.MiraiPlatformUtils
 import net.mamoe.mirai.utils.MiraiExperimentalApi
-import kotlin.jvm.JvmSynthetic
+import net.mamoe.mirai.utils.md5
+import net.mamoe.mirai.utils.toUHexString
 
 internal data class BotAccount(
     @JvmSynthetic
     internal val id: Long,
     @JvmSynthetic
     @MiraiExperimentalApi
-    val passwordMd5: ByteArray // md5
+    val passwordMd5: ByteArray, // md5
+
+    val phoneNumber: String = ""
 ) {
-    constructor(id: Long, passwordPlainText: String) : this(id, MiraiPlatformUtils.md5(passwordPlainText.toByteArray()))
+    init {
+        check(passwordMd5.size == 16) {
+            "Invalid passwordMd5: size must be 16 but got ${passwordMd5.size}. passwordMd5=${passwordMd5.toUHexString()}"
+        }
+    }
+
+    constructor(id: Long, passwordPlainText: String, phoneNumber: String = "") : this(
+        id,
+        passwordPlainText.md5(),
+        phoneNumber
+    )
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other == null || this::class != other::class) return false

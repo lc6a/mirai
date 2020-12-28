@@ -14,10 +14,7 @@ package net.mamoe.mirai.event
 import kotlinx.coroutines.*
 import net.mamoe.mirai.Bot
 import net.mamoe.mirai.event.events.BotEvent
-import net.mamoe.mirai.utils.PlannedRemoval
-import net.mamoe.mirai.utils.SinceMirai
 import kotlin.coroutines.resume
-import kotlin.jvm.JvmSynthetic
 import kotlin.reflect.KClass
 
 
@@ -32,7 +29,6 @@ import kotlin.reflect.KClass
  *
  * @throws TimeoutCancellationException 在超时后抛出.
  */
-@SinceMirai("1.2.0")
 @JvmSynthetic
 public suspend inline fun <reified E : Event> nextEvent(
     timeoutMillis: Long = -1,
@@ -57,7 +53,6 @@ public suspend inline fun <reified E : Event> nextEvent(
  *
  * @return 事件实例, 在超时后返回 `null`
  */
-@SinceMirai("1.2.0")
 @JvmSynthetic
 public suspend inline fun <reified E : Event> nextEventOrNull(
     timeoutMillis: Long,
@@ -69,30 +64,6 @@ public suspend inline fun <reified E : Event> nextEventOrNull(
     }
 }
 
-//
-//
-// 以下为已弃用的函数
-//
-//
-//
-
-
-@PlannedRemoval("1.3.0")
-@Suppress("DeprecatedCallableAddReplaceWith")
-@Deprecated(
-    "Deprecated for better Coroutine life cycle management. Please filter bot instance on your own.",
-    level = DeprecationLevel.HIDDEN
-)
-@JvmSynthetic
-public suspend inline fun <reified E : BotEvent> Bot.nextEvent(
-    timeoutMillis: Long = -1,
-    priority: Listener.EventPriority = EventPriority.MONITOR
-): E {
-    require(timeoutMillis == -1L || timeoutMillis > 0) { "timeoutMillis must be -1 or > 0" }
-    return withTimeoutOrCoroutineScope(timeoutMillis) {
-        nextBotEventImpl(this@nextEvent, E::class, this, priority)
-    }
-}
 
 @JvmSynthetic
 @PublishedApi
@@ -102,7 +73,7 @@ internal suspend inline fun <E : Event> nextEventImpl(
     priority: Listener.EventPriority,
     crossinline filter: (E) -> Boolean
 ): E = suspendCancellableCoroutine { cont ->
-    coroutineScope.subscribe(eventClass, priority = priority) {
+    coroutineScope.globalEventChannel().subscribe(eventClass, priority = priority) {
         if (!filter(this)) return@subscribe ListeningStatus.LISTENING
 
         try {
@@ -121,7 +92,7 @@ internal suspend inline fun <E : BotEvent> nextBotEventImpl(
     coroutineScope: CoroutineScope,
     priority: Listener.EventPriority
 ): E = suspendCancellableCoroutine { cont ->
-    coroutineScope.subscribe(eventClass, priority = priority) {
+    coroutineScope.globalEventChannel().subscribe(eventClass, priority = priority) {
         try {
             if (this.bot == bot) cont.resume(this)
         } catch (e: Exception) {

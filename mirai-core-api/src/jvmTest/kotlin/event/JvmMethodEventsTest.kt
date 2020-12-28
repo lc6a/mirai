@@ -12,10 +12,10 @@ package net.mamoe.mirai.event
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
-import net.mamoe.mirai.event.*
 import org.jetbrains.annotations.NotNull
 import org.junit.jupiter.api.Test
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertEquals
 
@@ -90,13 +90,40 @@ internal class JvmMethodEventsTest {
         }
 
         TestClass().run {
-            this.registerEvents()
+            this.globalEventChannel().registerListenerHost(this)
 
             runBlocking {
                 TestEvent().broadcast()
             }
 
             assertEquals(9, this.getCalled())
+        }
+    }
+
+    @Test
+    fun testExceptionHandle() {
+        class MyException : RuntimeException()
+
+        class TestClass : SimpleListenerHost() {
+            override fun handleException(context: CoroutineContext, exception: Throwable) {
+                assert(exception is ExceptionInEventHandlerException)
+                assert(exception.event is TestEvent)
+                assert(exception.rootCause is MyException)
+            }
+
+            @Suppress("unused")
+            @EventHandler
+            private suspend fun TestEvent.test() {
+                throw MyException()
+            }
+        }
+
+        TestClass().run {
+            this.globalEventChannel().registerListenerHost(this)
+
+            runBlocking {
+                TestEvent().broadcast()
+            }
         }
     }
 
@@ -122,14 +149,14 @@ internal class JvmMethodEventsTest {
             }
         }
 
-//        TestClass().run {
-//            this.registerEvents()
-//
-//            runBlocking {
-//                TestEvent().broadcast()
-//            }
-//
-//            assertEquals(1, this.getCalled())
-//        }
+        TestClass().run {
+            this.globalEventChannel().registerListenerHost(this)
+
+            runBlocking {
+                TestEvent().broadcast()
+            }
+
+            assertEquals(1, this.getCalled())
+        }
     }
 }

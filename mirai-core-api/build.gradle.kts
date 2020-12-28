@@ -6,8 +6,9 @@
  *
  *  https://github.com/mamoe/mirai/blob/master/LICENSE
  */
-
 @file:Suppress("UNUSED_VARIABLE")
+
+import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 
 plugins {
     kotlin("multiplatform")
@@ -22,6 +23,14 @@ plugins {
 description = "Mirai API module"
 
 val isAndroidSDKAvailable: Boolean by project
+
+afterEvaluate {
+    tasks.getByName("compileKotlinCommon").enabled = false
+    tasks.getByName("compileTestKotlinCommon").enabled = false
+
+    tasks.getByName("compileCommonMainKotlinMetadata").enabled = false
+    tasks.getByName("compileKotlinMetadata").enabled = false
+}
 
 kotlin {
     explicitApi()
@@ -46,53 +55,50 @@ kotlin {
         )
     }
 
-    jvm {
-        withJava()
+    jvm("common") {
+        attributes.attribute(KotlinPlatformType.attribute, KotlinPlatformType.common)
     }
+
+    jvm("jvm")
+
+//    jvm("android") {
+//        attributes.attribute(Attribute.of("mirai.target.platform", String::class.java), "android")
+//    }
 
     sourceSets {
         val commonMain by getting {
             dependencies {
+                implementation(project(":mirai-core-utils"))
                 api(kotlin("serialization"))
                 api(kotlin("reflect"))
 
                 api1(`kotlinx-serialization-core`)
+                api1(`kotlinx-serialization-json`)
                 implementation1(`kotlinx-serialization-protobuf`)
-                api1(`kotlinx-io`)
-                api1(`kotlinx-coroutines-io`)
+                api1(`kotlinx-io-jvm`)
+                api1(`kotlinx-coroutines-io-jvm`)
                 api(`kotlinx-coroutines-core`)
 
                 implementation1(`kotlinx-atomicfu`)
 
-                api1(`ktor-client-cio`)
+                api1(`ktor-client-okhttp`)
                 api1(`ktor-client-core`)
                 api1(`ktor-network`)
+
+                compileOnly(`log4j-api`)
+                compileOnly(slf4j)
             }
         }
 
         if (isAndroidSDKAvailable) {
             androidMain {
                 dependencies {
-                    api(kotlin("reflect"))
-
-                    api1(`kotlinx-io-jvm`)
-                    api1(`kotlinx-coroutines-io-jvm`)
-
                     api1(`ktor-client-android`)
                 }
             }
         }
 
-        val jvmMain by getting {
-            dependencies {
-                api(kotlin("reflect"))
-                compileOnly(`log4j-api`)
-                compileOnly(slf4j)
-
-                api1(`kotlinx-io-jvm`)
-                api1(`kotlinx-coroutines-io-jvm`)
-            }
-        }
+        val jvmMain by getting
 
         val jvmTest by getting {
             dependencies {

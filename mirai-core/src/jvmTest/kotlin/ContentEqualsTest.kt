@@ -6,25 +6,23 @@
  *
  *  https://github.com/mamoe/mirai/blob/master/LICENSE
  */
+
 package net.mamoe.mirai.internal
 
-import net.mamoe.mirai.message.data.ConstrainSingle
-import net.mamoe.mirai.message.data.Image
-import net.mamoe.mirai.message.data.Message
-import net.mamoe.mirai.message.data.buildMessageChain
+import net.mamoe.mirai.message.data.*
+import net.mamoe.mirai.utils.safeCast
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-internal class TestConstrainSingleMessage : ConstrainSingle<TestConstrainSingleMessage>, Any() {
-    companion object Key : Message.Key<TestConstrainSingleMessage> {
-        override val typeName: String
-            get() = "TestMessage"
-    }
+internal class TestConstrainSingleMessage : ConstrainSingle, Any() {
+    companion object Key : AbstractMessageKey<TestConstrainSingleMessage>({ it.safeCast() })
 
     override fun toString(): String = "<TestConstrainSingleMessage#${super.hashCode()}>"
+    override fun contentToString(): String = ""
 
-    override val key: Message.Key<TestConstrainSingleMessage>
+    override val key: MessageKey<TestConstrainSingleMessage>
         get() = Key
 }
 
@@ -54,13 +52,11 @@ internal class ContentEqualsTest {
             })
         }
 
-        assertTrue {
-            buildMessageChain {
-                +mySource
-                +"test"
-                +mySource
-            }.contentEquals("test")
-        }
+        assertEquals("test", buildMessageChain {
+            +mySource
+            +"test"
+            +mySource
+        }.content)
 
         assertTrue {
             buildMessageChain {
@@ -84,13 +80,12 @@ internal class ContentEqualsTest {
             })
         }
 
-        assertTrue {
-            buildMessageChain {
-                +mySource
-                +"test"
-                +mySource
-            }.contentEquals("test")
-        }
+
+        assertEquals("test", buildMessageChain {
+            +mySource
+            +"test"
+            +mySource
+        }.content)
 
         assertTrue {
             buildMessageChain {

@@ -10,62 +10,48 @@
 @file:JvmMultifileClass
 @file:JvmName("MessageUtils")
 
-@file:Suppress("EXPERIMENTAL_API_USAGE")
+@file:Suppress("EXPERIMENTAL_API_USAGE", "NOTHING_TO_INLINE")
 
 package net.mamoe.mirai.message.data
 
-import net.mamoe.mirai.LowLevelApi
+import kotlinx.serialization.Serializable
+import net.mamoe.mirai.contact.Group
 import net.mamoe.mirai.contact.Member
+import net.mamoe.mirai.contact.UserOrBot
 import net.mamoe.mirai.contact.nameCardOrNick
 import net.mamoe.mirai.message.code.CodableMessage
-import kotlin.jvm.JvmMultifileClass
-import kotlin.jvm.JvmName
-import kotlin.jvm.JvmStatic
-import kotlin.jvm.JvmSynthetic
 
 
 /**
  * At 一个群成员. 只能发送给一个群.
  *
  * ## mirai 码支持
- * 格式: &#91;mirai:at:*[target]*,*[display]*&#93;
+ * 格式: &#91;mirai:at:*[target]*&#93;
  *
  * @see AtAll 全体成员
  */
-public data class At
-@Suppress("DataClassPrivateConstructor")
-private constructor(
+@Serializable
+public data class At(
     public val target: Long,
-    /**
-     * "@群员名片"
-     */
-    public val display: String
 ) : MessageContent, CodableMessage {
+    public override fun toString(): String = "[mirai:at:$target]"
+    public override fun contentToString(): String = "@$target"
 
     /**
-     * 构造一个 [At] 实例. 这是唯一的公开的构造方式.
+     * 获取 [At] 发送于指定 [Group] 时会显示的内容.
+     *
+     * 若 [group] 非 `null` 且包含成员 [target], 返回 `"@成员名片或昵称"`. 否则返回 `"@123456"` 其中 123456 表示 [target]
      */
-    public constructor(member: Member) : this(member.id, "@${member.nameCardOrNick}")
-
-    public override fun equals(other: Any?): Boolean {
-        return other is At && other.target == this.target && other.display == this.display
+    public fun getDisplay(group: Group?): String {
+        val member = group?.get(this.target) ?: return "@$target"
+        return "@${member.nameCardOrNick}"
     }
 
-    public override fun toString(): String = "[mirai:at:$target,$display]"
-    public override fun contentToString(): String = this.display
-
-    public companion object Key : Message.Key<At> {
-        public override val typeName: String
-            get() = "At"
-
-        /**
-         * 构造一个 [At], 仅供内部使用, 否则可能造成消息无法发出的问题.
-         */
-        @Suppress("FunctionName")
-        @JvmStatic
-        @LowLevelApi
-        public fun _lowLevelConstructAtInstance(target: Long, display: String): At = At(target, display)
+    override fun appendMiraiCode(builder: StringBuilder) {
+        builder.append("[mirai:at:").append(target).append(']')
     }
+
+    public companion object;
 
     // 自动为消息补充 " "
     public override fun followedBy(tail: Message): MessageChain {
@@ -74,18 +60,19 @@ private constructor(
         }
         return super<MessageContent>.followedBy(PlainText(" ")) + tail
     }
-
-    public override fun hashCode(): Int {
-        var result = target.hashCode()
-        result = 31 * result + display.hashCode()
-        return result
-    }
-
 }
+
+/**
+ * 构造 [At]
+ *
+ * @see At
+ * @see Member.at
+ */
+@JvmSynthetic
+public inline fun At(user: UserOrBot): At = At(user.id)
 
 /**
  * At 这个成员
  */
 @JvmSynthetic
-@Suppress("NOTHING_TO_INLINE")
 public inline fun Member.at(): At = At(this)

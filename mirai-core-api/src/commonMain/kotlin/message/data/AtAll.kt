@@ -13,9 +13,8 @@
 
 package net.mamoe.mirai.message.data
 
+import kotlinx.serialization.Serializable
 import net.mamoe.mirai.message.code.CodableMessage
-import kotlin.jvm.JvmMultifileClass
-import kotlin.jvm.JvmName
 
 private const val displayA = "@全体成员"
 
@@ -29,18 +28,24 @@ private const val displayA = "@全体成员"
  *
  * @see At at 单个群成员
  */
+@Serializable
 public object AtAll :
-    Message.Key<AtAll>,
     MessageContent, CodableMessage {
     public const val display: String = displayA
-    public override val typeName: String
-        get() = "AtAll"
 
     @Suppress("SpellCheckingInspection")
     public override fun toString(): String = "[mirai:atall]"
     public override fun contentToString(): String = display
     public override fun equals(other: Any?): Boolean {
         return other === this
+    }
+
+    override fun toMiraiCode(): String {
+        return toString()
+    }
+
+    override fun appendMiraiCode(builder: StringBuilder) {
+        builder.append(toString())
     }
 
     public override fun hashCode(): Int {

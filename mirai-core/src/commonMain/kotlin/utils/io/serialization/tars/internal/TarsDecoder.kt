@@ -20,6 +20,7 @@ import kotlinx.serialization.internal.TaggedDecoder
 import kotlinx.serialization.modules.SerializersModule
 import net.mamoe.mirai.internal.utils.io.serialization.tars.Tars
 import net.mamoe.mirai.internal.utils.io.serialization.tars.TarsId
+import net.mamoe.mirai.internal.utils.io.serialization.tars.internal.*
 
 
 @OptIn(InternalSerializationApi::class, ExperimentalSerializationApi::class)
@@ -47,6 +48,9 @@ internal class TarsDecoder(
     private val SimpleByteArrayReader: SimpleByteArrayReaderImpl = SimpleByteArrayReaderImpl()
 
     private inner class SimpleByteArrayReaderImpl : AbstractDecoder() {
+        override val serializersModule: SerializersModule
+            get() = this@TarsDecoder.serializersModule
+
         override fun decodeSequentially(): Boolean = true
 
         override fun endStructure(descriptor: SerialDescriptor) {
@@ -82,6 +86,9 @@ internal class TarsDecoder(
     private val ListReader: ListReaderImpl = ListReaderImpl()
 
     private inner class ListReaderImpl : AbstractDecoder() {
+        override val serializersModule: SerializersModule
+            get() = this@TarsDecoder.serializersModule
+
         override fun decodeSequentially(): Boolean = true
         override fun decodeElementIndex(descriptor: SerialDescriptor): Int = error("should not be reached")
         override fun endStructure(descriptor: SerialDescriptor) {
@@ -116,6 +123,9 @@ internal class TarsDecoder(
     private val MapReader: MapReaderImpl = MapReaderImpl()
 
     private inner class MapReaderImpl : AbstractDecoder() {
+        override val serializersModule: SerializersModule
+            get() = this@TarsDecoder.serializersModule
+
         override fun decodeSequentially(): Boolean = true
         override fun decodeElementIndex(descriptor: SerialDescriptor): Int = error("stub")
 

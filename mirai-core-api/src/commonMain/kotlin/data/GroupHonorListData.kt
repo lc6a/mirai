@@ -12,21 +12,17 @@ package net.mamoe.mirai.data
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Serializer
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import net.mamoe.mirai.utils.MiraiExperimentalApi
-import net.mamoe.mirai.utils.SinceMirai
-import kotlin.jvm.JvmStatic
 
 /**
  * 群荣誉信息
  */
 @MiraiExperimentalApi
-@SinceMirai("1.3.0")
 public enum class GroupHonorType(public val value: Int) {
     TALKATIVE(1),       // 龙王
     PERFORMER(2),       // 群聊之火
@@ -44,7 +40,6 @@ public enum class GroupHonorType(public val value: Int) {
 }
 
 @MiraiExperimentalApi
-@SinceMirai("1.3.0")
 @Serializable
 public data class GroupHonorListData(
     @SerialName("acceptLanguages")
@@ -234,7 +229,6 @@ public data class GroupHonorListData(
         val tagColor: String? = null
     )
 
-    @Serializer(forClass = GroupHonorType::class)
     public object GroupHonorTypeSerializer : KSerializer<GroupHonorType> {
         override val descriptor: SerialDescriptor =
             PrimitiveSerialDescriptor("GroupHonorTypeSerializer", PrimitiveKind.INT)

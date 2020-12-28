@@ -13,12 +13,12 @@
 
 package net.mamoe.mirai.message.data
 
+import kotlinx.serialization.Serializable
+import net.mamoe.mirai.message.code.CodableMessage
+import net.mamoe.mirai.message.code.internal.appendAsMiraiCode
 import net.mamoe.mirai.utils.MiraiExperimentalApi
+import net.mamoe.mirai.utils.safeCast
 import kotlin.annotation.AnnotationTarget.*
-import kotlin.jvm.JvmMultifileClass
-import kotlin.jvm.JvmName
-import kotlin.jvm.JvmOverloads
-import kotlin.jvm.JvmSynthetic
 
 /**
  * XML, JSON 消息等富文本消息
@@ -29,7 +29,9 @@ import kotlin.jvm.JvmSynthetic
  * @see LightApp 小程序 (JSON)
  */
 // not using sealed class for customized implementations
-public interface RichMessage : MessageContent {
+// using polymorphic serializer from Message.Serializer
+public interface RichMessage : MessageContent, ConstrainSingle {
+    override val key: MessageKey<*> get() = Key
 
     /**
      * **注意**: 富文本消息的 [RichMessage.contentEquals] 和 [RichMessage.toString] 都不稳定. 将来可能在没有任何警告的情况下改变格式.
@@ -47,12 +49,14 @@ public interface RichMessage : MessageContent {
      * @suppress 此 API 不稳定, 可能在任意时刻被删除
      */
     @MiraiExperimentalApi
-    public companion object Templates : Message.Key<RichMessage> {
+    public companion object Key :
+        AbstractPolymorphicMessageKey<MessageContent, RichMessage>(MessageContent, { it.safeCast() }) {
 
         /**
          * @suppress 此 API 不稳定, 可能在任意时刻被删除
          */
         @MiraiExperimentalApi
+        @JvmStatic
         public fun share(
             url: String,
             title: String? = null,
@@ -78,9 +82,6 @@ public interface RichMessage : MessageContent {
                     }
                 }
             }
-
-        override val typeName: String
-            get() = "RichMessage"
     }
 }
 
@@ -93,12 +94,15 @@ public interface RichMessage : MessageContent {
  *
  * @see ServiceMessage 服务消息
  */
-public data class LightApp(override val content: String) : RichMessage {
-    public companion object Key : Message.Key<LightApp> {
-        public override val typeName: String get() = "LightApp"
-    }
+@Serializable
+public data class LightApp(override val content: String) : RichMessage, CodableMessage {
+    public companion object Key : AbstractMessageKey<LightApp>({ it.safeCast() })
 
     public override fun toString(): String = "[mirai:app:$content]"
+
+    override fun appendMiraiCode(builder: StringBuilder) {
+        builder.append("[mirai:app:").appendAsMiraiCode(content).append(']')
+    }
 }
 
 /**
@@ -111,28 +115,56 @@ public data class LightApp(override val content: String) : RichMessage {
  *
  * @see LightApp 小程序类型消息
  */
-public open class ServiceMessage(
-    public val serviceId: Int,
-    public final override val content: String
-) : RichMessage {
-    public companion object Key : Message.Key<ServiceMessage> {
-        public override val typeName: String get() = "ServiceMessage"
-    }
+@MiraiExperimentalApi
+@Serializable
+public class SimpleServiceMessage(
+    public override val serviceId: Int,
+    public override val content: String
+) : ServiceMessage {
+    public override fun toString(): String = "[mirai:service:$serviceId,$content]"
 
-    public final override fun toString(): String = "[mirai:service:$serviceId,$content]"
-
-    public final override fun equals(other: Any?): Boolean {
+    public override fun equals(other: Any?): Boolean {
         if (other == null) return false
         if (other::class != this::class) return false
         other as ServiceMessage
         return other.serviceId == this.serviceId && other.content == this.content
     }
 
-    public final override fun hashCode(): Int {
+    public override fun hashCode(): Int {
         var result = serviceId
         result = 31 * result + content.hashCode()
         return result
     }
+
+}
+
+
+/**
+ * 服务消息, 可以是 JSON 消息或 XML 消息.
+ *
+ * JSON 消息更多情况下通过 [LightApp] 发送.
+ *
+ * @see LightApp 小程序类型消息
+ * @see SimpleServiceMessage
+ */
+public interface ServiceMessage : RichMessage, CodableMessage {
+    public companion object Key :
+        AbstractPolymorphicMessageKey<RichMessage, ServiceMessage>(RichMessage, { it.safeCast() })
+
+    /**
+     * 目前未知, XML 一般为 60, JSON 一般为 1
+     */
+    public val serviceId: Int
+
+    override fun appendMiraiCode(builder: StringBuilder) {
+        builder.append("[mirai:service:").append(serviceId).append(',').appendAsMiraiCode(content).append(']')
+    }
+}
+
+@MiraiExperimentalApi
+@Serializable
+public abstract class AbstractServiceMessage : ServiceMessage {
+    public override fun toString(): String = "[mirai:service:$serviceId,$content]"
 }
 
 
@@ -152,7 +184,7 @@ commonElem=CommonElem#750141174 {
 @JvmSynthetic
 @MiraiExperimentalApi
 public inline fun buildXmlMessage(serviceId: Int, block: @XmlMessageDsl XmlMessageBuilder.() -> Unit): ServiceMessage =
-    ServiceMessage(serviceId, XmlMessageBuilder().apply(block).text)
+    SimpleServiceMessage(serviceId, XmlMessageBuilder().apply(block).text)
 
 @MiraiExperimentalApi
 @Target(CLASS, FUNCTION, TYPE)
@@ -225,12 +257,16 @@ public class XmlMessageBuilder(
     }
 }
 
+@Serializable
 @MiraiExperimentalApi
-internal class LongMessage internal constructor(content: String, val resId: String) : ServiceMessage(35, content) {
-    companion object Key : Message.Key<LongMessage> {
-        override val typeName: String get() = "LongMessage"
-    }
+internal data class LongMessage internal constructor(override val content: String, val resId: String) :
+    AbstractServiceMessage() {
+    override val serviceId: Int get() = 35
+
+    companion object Key : AbstractPolymorphicMessageKey<ServiceMessage, LongMessage>(ServiceMessage, { it.safeCast() })
 }
 
-
-internal class ForwardMessageInternal(content: String) : ServiceMessage(35, content)
+@Serializable
+internal data class ForwardMessageInternal(override val content: String) : AbstractServiceMessage() {
+    override val serviceId: Int get() = 35
+}

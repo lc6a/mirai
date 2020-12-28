@@ -18,9 +18,21 @@ import net.mamoe.mirai.internal.network.protocol.data.proto.Cmd0x388
 import net.mamoe.mirai.internal.network.protocol.packet.OutgoingPacket
 import net.mamoe.mirai.internal.network.protocol.packet.OutgoingPacketFactory
 import net.mamoe.mirai.internal.network.protocol.packet.buildOutgoingUniPacket
-import net.mamoe.mirai.internal.utils.encodeToString
 import net.mamoe.mirai.internal.utils.io.serialization.readProtoBuf
 import net.mamoe.mirai.internal.utils.io.serialization.writeProtoBuf
+import net.mamoe.mirai.internal.utils.toIpV4AddressString
+import net.mamoe.mirai.utils.ExternalResource
+import net.mamoe.mirai.utils.encodeToString
+import net.mamoe.mirai.utils.toUHexString
+
+internal val ExternalResource.voiceCodec: Int
+    get() {
+        return when (formatName) {
+            "amr" -> 0  // amr
+            "silk" -> 1  // silk V3
+            else -> 0     // use amr by default
+        }
+    }
 
 internal class PttStore {
     object GroupPttUp : OutgoingPacketFactory<GroupPttUp.Response>("PttStore.GroupPttUp") {
@@ -35,7 +47,18 @@ internal class PttStore {
                 val fileKey: ByteArray
             ) : GroupPttUp.Response() {
                 override fun toString(): String {
-                    return "RequireUpload(fileId=$fileId, uKey=${uKey.contentToString()})"
+                    return "RequireUpload(" +
+                            "fileId=$fileId, " +
+                            "uploadServers=${
+                                uploadIpList.zip(uploadPortList)
+                                    .joinToString(
+                                        prefix = "[",
+                                        postfix = "]"
+                                    ) { "${it.first.toIpV4AddressString()}:${it.second}1" }
+                            }, " +
+                            "uKey=${uKey.toUHexString("")}, " +
+                            "fileKey=${fileKey.toUHexString("")}" +
+                            ")"
                 }
             }
         }
@@ -45,9 +68,7 @@ internal class PttStore {
             client: QQAndroidClient,
             uin: Long,
             groupCode: Long,
-            md5: ByteArray,
-            size: Long,
-            codec: Int = 0
+            resource: ExternalResource
         ): OutgoingPacket {
             val pack = Cmd0x388.ReqBody(
                 netType = 3, // wifi
@@ -57,16 +78,16 @@ internal class PttStore {
                         srcUin = uin,
                         groupCode = groupCode,
                         fileId = 0,
-                        fileSize = size,
-                        fileMd5 = md5,
-                        fileName = md5,
+                        fileSize = resource.size,
+                        fileMd5 = resource.md5,
+                        fileName = resource.md5,
                         srcTerm = 5,
                         platformType = 9,
                         buType = 4,
                         innerIp = 0,
                         buildVer = "6.5.5.663".encodeToByteArray(),
                         voiceLength = 1,
-                        codec = codec,
+                        codec = 0, // don't use resource.codec
                         voiceType = 1,
                         boolNewUpChan = true
                     )
@@ -80,7 +101,8 @@ internal class PttStore {
 
         override suspend fun ByteReadPacket.decode(bot: QQAndroidBot): Response {
             val resp0 = readProtoBuf(Cmd0x388.RspBody.serializer())
-            val resp = resp0.msgTryupPttRsp.firstOrNull() ?: error("cannot find `msgTryupPttRsp` from `Cmd0x388.RspBody`")
+            val resp =
+                resp0.msgTryupPttRsp.firstOrNull() ?: error("cannot find `msgTryupPttRsp` from `Cmd0x388.RspBody`")
             if (resp.failMsg != null) {
                 throw IllegalStateException(resp.failMsg.encodeToString())
             }
@@ -144,7 +166,8 @@ internal class PttStore {
 
         override suspend fun ByteReadPacket.decode(bot: QQAndroidBot): Response {
             val resp0 = readProtoBuf(Cmd0x388.RspBody.serializer())
-            val resp = resp0.msgGetpttUrlRsp.firstOrNull() ?: error("cannot find `msgGetpttUrlRsp` from `Cmd0x388.RspBody`")
+            val resp =
+                resp0.msgGetpttUrlRsp.firstOrNull() ?: error("cannot find `msgGetpttUrlRsp` from `Cmd0x388.RspBody`")
             if (!resp.failMsg.contentEquals(EMPTY_BYTE_ARRAY)) {
                 throw IllegalStateException(resp.failMsg.encodeToString())
             }

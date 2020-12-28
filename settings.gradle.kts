@@ -14,6 +14,8 @@ pluginManagement {
         mavenCentral()
         jcenter()
         google()
+        maven(url = "https://dl.bintray.com/kotlin/kotlin-eap")
+        maven(url = "https://dl.bintray.com/kotlin/kotlin-dev")
         maven(url = "https://dl.bintray.com/jetbrains/kotlin-native-dependencies")
         maven(url = "https://kotlin.bintray.com/kotlinx")
     }
@@ -21,6 +23,7 @@ pluginManagement {
 
 rootProject.name = "mirai"
 
+include(":mirai-core-utils")
 include(":mirai-core-api")
 include(":mirai-core")
 include(":mirai-core-all")

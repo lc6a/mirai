@@ -13,20 +13,17 @@
 
 package net.mamoe.mirai.event.events
 
+import net.mamoe.kjbb.JvmBlockingBridge
 import net.mamoe.mirai.Bot
-import net.mamoe.mirai.JavaFriendlyAPI
 import net.mamoe.mirai.Mirai
 import net.mamoe.mirai.contact.Friend
 import net.mamoe.mirai.contact.Group
 import net.mamoe.mirai.contact.User
 import net.mamoe.mirai.event.AbstractEvent
-import net.mamoe.mirai.event.internal.MiraiAtomicBoolean
 import net.mamoe.mirai.internal.network.Packet
 import net.mamoe.mirai.message.action.Nudge
 import net.mamoe.mirai.utils.MiraiExperimentalApi
-import net.mamoe.mirai.utils.SinceMirai
-import net.mamoe.mirai.utils.internal.runBlocking
-import kotlin.jvm.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 
 /**
@@ -36,14 +33,7 @@ public data class FriendRemarkChangeEvent internal constructor(
     public override val friend: Friend,
     public val oldRemark: String,
     public val newRemark: String
-) : FriendEvent, Packet, AbstractEvent() {
-    @Deprecated(
-        message = "Please use newRemark",
-        replaceWith = ReplaceWith("newRemark"),
-        level = DeprecationLevel.ERROR
-    )
-    val newName: String get() = newRemark
-}
+) : FriendEvent, Packet, AbstractEvent()
 
 /**
  * 成功添加了一个新好友的事件
@@ -90,29 +80,18 @@ public data class NewFriendRequestEvent internal constructor(
     public val fromNick: String
 ) : BotEvent, Packet, AbstractEvent() {
     @JvmField
-    internal val responded: MiraiAtomicBoolean = MiraiAtomicBoolean(false)
+    internal val responded: AtomicBoolean = AtomicBoolean(false)
 
     /**
      * @return 申请人来自的群. 当申请人来自其他途径申请时为 `null`
      */
     public val fromGroup: Group? = if (fromGroupId == 0L) null else bot.getGroup(fromGroupId)
 
-    @JvmSynthetic
+    @JvmBlockingBridge
     public suspend fun accept(): Unit = Mirai.acceptNewFriendRequest(this)
 
-    @JvmSynthetic
+    @JvmBlockingBridge
     public suspend fun reject(blackList: Boolean = false): Unit = Mirai.rejectNewFriendRequest(this, blackList)
-
-
-    @JavaFriendlyAPI
-    @JvmName("accept")
-    public fun __acceptBlockingForJava__(): Unit = runBlocking { accept() }
-
-    @JavaFriendlyAPI
-    @JvmOverloads
-    @JvmName("reject")
-    public fun __rejectBlockingForJava__(blackList: Boolean = false): Unit =
-        runBlocking { reject(blackList) }
 }
 
 
@@ -127,7 +106,6 @@ public data class FriendAvatarChangedEvent internal constructor(
  * [Friend] 昵称改变事件, 在此事件广播时好友已经完成改名
  * @see BotNickChangedEvent
  */
-@SinceMirai("1.2.0")
 public data class FriendNickChangedEvent internal constructor(
     public override val friend: Friend,
     public val from: String,
@@ -137,7 +115,6 @@ public data class FriendNickChangedEvent internal constructor(
 /**
  * 好友输入状态改变的事件，当开始输入文字、退出聊天窗口或清空输入框时会触发此事件
  */
-@SinceMirai("1.2.0")
 public data class FriendInputStatusChangedEvent internal constructor(
     public override val friend: Friend,
     public val inputting: Boolean
@@ -149,7 +126,6 @@ public data class FriendInputStatusChangedEvent internal constructor(
  *
  * 注: 此事件仅可能在私聊中发生
  */
-@SinceMirai("2.0.0")
 @MiraiExperimentalApi
 public sealed class FriendNudgedEvent : AbstractEvent(), FriendEvent, Packet {
     /**

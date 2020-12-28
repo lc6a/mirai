@@ -14,6 +14,7 @@ import org.jetbrains.dokka.gradle.DokkaTask
 import org.jetbrains.kotlin.gradle.dsl.*
 import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
 import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
+import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 
 buildscript {
@@ -71,13 +72,14 @@ allprojects {
     version = Versions.project
 
     repositories {
-        mavenLocal()
+        // mavenLocal() // cheching issue cause compiler exception
         // maven(url = "https://mirrors.huaweicloud.com/repository/maven")
+        jcenter()
         maven(url = "https://dl.bintray.com/kotlin/kotlin-eap")
         maven(url = "https://kotlin.bintray.com/kotlinx")
-        jcenter()
         google()
         mavenCentral()
+        maven(url = "https://dl.bintray.com/karlatemp/misc")
     }
 
     afterEvaluate {
@@ -87,12 +89,19 @@ allprojects {
         configureKotlinTestSettings()
         configureKotlinCompilerSettings()
         configureKotlinExperimentalUsages()
+        //  useIr()
 
         if (isKotlinJvmProject) {
             configureFlattenSourceSets()
         }
 
         configureDokka()
+    }
+}
+
+fun Project.useIr() {
+    kotlinCompilations?.forEach { kotlinCompilation ->
+        kotlinCompilation.kotlinOptions.freeCompilerArgs += "-Xuse-ir"
     }
 }
 
@@ -137,6 +146,14 @@ fun Project.configureDokka() {
 fun Project.configureJvmTarget() {
     tasks.withType(KotlinJvmCompile::class.java) {
         kotlinOptions.jvmTarget = "1.8"
+    }
+
+    kotlinTargets.orEmpty().filterIsInstance<KotlinJvmTarget>().forEach { target ->
+        target.compilations.all {
+            kotlinOptions.jvmTarget = "1.8"
+            kotlinOptions.languageVersion = "1.4"
+        }
+        target.testRuns["test"].executionTask.configure { useJUnitPlatform() }
     }
 
     extensions.findByType(JavaPluginExtension::class.java)?.run {
@@ -238,20 +255,27 @@ val experimentalAnnotations = arrayOf(
     "kotlin.RequiresOptIn",
     "kotlin.contracts.ExperimentalContracts",
     "kotlin.experimental.ExperimentalTypeInference",
+    "kotlin.ExperimentalUnsignedTypes",
+    "kotlin.time.ExperimentalTime",
+
+    "kotlinx.serialization.ExperimentalSerializationApi",
+
     "net.mamoe.mirai.utils.MiraiInternalApi",
     "net.mamoe.mirai.utils.MiraiExperimentalApi",
     "net.mamoe.mirai.LowLevelApi",
-    "kotlinx.serialization.ExperimentalSerializationApi"
+    "net.mamoe.mirai.utils.UnstableExternalImage",
+
+    "net.mamoe.mirai.message.data.ExperimentalMessageKey"
 )
 
 fun Project.configureKotlinExperimentalUsages() {
     val sourceSets = kotlinSourceSets ?: return
 
     for (target in sourceSets) {
+        target.languageSettings.progressiveMode = true
+        target.languageSettings.enableLanguageFeature("InlineClasses")
         experimentalAnnotations.forEach { a ->
             target.languageSettings.useExperimentalAnnotation(a)
-            target.languageSettings.progressiveMode = true
-            target.languageSettings.enableLanguageFeature("InlineClasses")
         }
     }
 }

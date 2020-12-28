@@ -13,18 +13,24 @@
 
 package net.mamoe.mirai.message.data
 
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.serialization.Serializable
+import net.mamoe.kjbb.JvmBlockingBridge
 import net.mamoe.mirai.Bot
 import net.mamoe.mirai.IMirai
 import net.mamoe.mirai.Mirai
 import net.mamoe.mirai.contact.*
-import net.mamoe.mirai.message.MessageEvent
+import net.mamoe.mirai.event.events.MessageEvent
 import net.mamoe.mirai.message.MessageReceipt
-import net.mamoe.mirai.message.quote
-import net.mamoe.mirai.message.recall
+import net.mamoe.mirai.message.MessageSourceSerializerImpl
+import net.mamoe.mirai.message.data.MessageSource.Key.isAboutFriend
+import net.mamoe.mirai.message.data.MessageSource.Key.isAboutGroup
+import net.mamoe.mirai.message.data.MessageSource.Key.isAboutTemp
+import net.mamoe.mirai.message.data.MessageSource.Key.quote
 import net.mamoe.mirai.utils.LazyProperty
-import kotlin.jvm.JvmMultifileClass
-import kotlin.jvm.JvmName
-import kotlin.jvm.JvmSynthetic
+import net.mamoe.mirai.utils.safeCast
 
 /**
  * 消息源. 消息源存在于 [MessageChain] 中, 用于表示这个消息的来源, 也可以用来分辨 [MessageChain].
@@ -32,28 +38,28 @@ import kotlin.jvm.JvmSynthetic
  * 对于来自 [MessageEvent.message] 的 [MessageChain]
  *
  *
- * ### 组成
+ * ## 组成
  * [MessageSource] 由 metadata (元数据), form & target, content 组成
  *
- * #### metadata
- * - [id] 消息 id (序列号)
- * - [internalId] 消息内部 id
+ * ### metadata
+ * - [ids] 消息 ids (序列号)
+ * - [internalIds] 消息内部 ids
  * - [time] 时间
  *
  * 官方客户端通过 metadata 这三个数据定位消息, 撤回和引用回复都是如此.
  *
- * #### form & target
+ * ### form & target
  * - [fromId] 消息发送人
  * - [targetId] 消息发送目标
  *
- * #### content
+ * ### content
  * - [originalMessage] 消息内容
  *
- * ### 使用
+ * ## 使用
  *
- * 消息源可用于 [引用回复][QuoteReply] 或 [撤回][Bot.recall].
+ * 消息源可用于 [引用回复][QuoteReply] 或 [撤回][IMirai.recallMessage].
  *
- * @see Bot.recall 撤回一条消息
+ * @see IMirai.recallMessage 撤回一条消息
  * @see MessageSource.quote 引用这条消息, 创建 [MessageChain]
  *
  * @see OnlineMessageSource 在线消息的 [MessageSource]
@@ -61,41 +67,48 @@ import kotlin.jvm.JvmSynthetic
  *
  * @see buildMessageSource 构造一个 [OfflineMessageSource]
  */
-public sealed class MessageSource : Message, MessageMetadata, ConstrainSingle<MessageSource> {
-    public companion object Key : Message.Key<MessageSource> {
-        override val typeName: String get() = "MessageSource"
-    }
-
-    public final override val key: Message.Key<MessageSource> get() = Key
+@Serializable(MessageSourceSerializerImpl.Companion::class)
+public sealed class MessageSource : Message, MessageMetadata, ConstrainSingle {
+    public final override val key: MessageKey<MessageSource>
+        get() = Key
 
     /**
-     * 所属 [Bot]
+     * 所属 [Bot.id]
      */
-    public abstract val bot: Bot
+    public abstract val botId: Long
 
     /**
-     * 消息 id (序列号). 在获取失败时 (概率很低) 为 `-1`.
-     **
-     * #### 值域
+     * 消息 ids (序列号). 在获取失败时 (概率很低) 为空数组.
+     *
+     * ### 值域
      * 值的范围约为 [UShort] 的范围.
      *
-     * #### 顺序
+     * ### 顺序
      * 群消息的 id 由服务器维护. 好友消息的 id 由 mirai 维护.
      * 此 id 不一定从 0 开始.
      *
      * - 在同一个群的消息中此值随每条消息递增 1, 但此行为由服务器决定, mirai 不保证自增顺序.
      * - 在好友消息中无法保证每次都递增 1. 也可能会产生大幅跳过的情况.
+     *
+     * ### 多 ID 情况
+     * 对于单条消息, [ids] 为单元素数组. 对于分片 (一种长消息处理机制) 消息, [ids] 将包含多元素.
+     *
+     * [internalIds] 与 [ids] 以数组下标对应.
      */
-    public abstract val id: Int
+    public abstract val ids: IntArray
 
     /**
-     * 内部 id. **仅用于协议模块使用**
+     * 内部 ids. **仅用于协议模块使用**
      *
      * 值没有顺序, 也可能为 0, 取决于服务器是否提供.
      *
-     * 在事件中和在引用中无法保证同一条消息的 [internalId] 相同.
+     * 在事件中和在引用中无法保证同一条消息的 [internalIds] 相同.
+     *
+     * [internalIds] 与 [ids] 以数组下标对应.
+     *
+     * @see ids
      */
-    public abstract val internalId: Int
+    public abstract val internalIds: IntArray
 
     /**
      * 发送时间时间戳, 单位为秒.
@@ -131,15 +144,140 @@ public sealed class MessageSource : Message, MessageMetadata, ConstrainSingle<Me
     public abstract val originalMessage: MessageChain
 
     /**
-     * 返回 `"[mirai:source:$id,$internalId]"`
+     * 返回 `"[mirai:source:${ids.contentToString()},${internalIds.contentToString()}]"`
      */
-    public final override fun toString(): String = "[mirai:source:$id,$internalId]"
+    public final override fun toString(): String =
+        "[mirai:source:${ids.contentToString()},${internalIds.contentToString()}]"
+
+    public companion object Key : AbstractMessageKey<MessageSource>({ it.safeCast() }) {
+        /**
+         * 撤回这条消息. 可撤回自己 2 分钟内发出的消息, 和任意时间的群成员的消息.
+         *
+         * **注意:** 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以撤回.
+         *
+         * *提示: 若要撤回一条机器人自己发出的消息, 使用 [Contact.sendMessage] 返回的 [MessageReceipt] 中的 [MessageReceipt.recall]*
+         *
+         * [Bot] 撤回自己的消息不需要权限.
+         * [Bot] 撤回群员的消息需要管理员权限.
+         *
+         * @throws PermissionDeniedException 当 [Bot] 无权限操作时
+         * @throws IllegalStateException 当这条消息已经被撤回时 (仅同步主动操作)
+         *
+         * @see IMirai.recallMessage
+         */
+        @JvmStatic
+        @JvmBlockingBridge
+        public suspend fun MessageSource.recall() {
+            // don't inline, compilation error
+            Mirai.recallMessage(bot, this)
+        }
+
+        /**
+         * 撤回这条消息. 可撤回自己 2 分钟内发出的消息, 和任意时间的群成员的消息.
+         *
+         * **注意:** 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以撤回.
+         *
+         * *提示: 若要撤回一条机器人自己发出的消息, 使用 [Contact.sendMessage] 返回的 [MessageReceipt] 中的 [MessageReceipt.recall]*
+         *
+         * [Bot] 撤回自己的消息不需要权限.
+         * [Bot] 撤回群员的消息需要管理员权限.
+         *
+         * @throws PermissionDeniedException 当 [Bot] 无权限操作时
+         * @throws IllegalStateException 当这条消息已经被撤回时 (仅同步主动操作)
+         *
+         * @see IMirai.recallMessage
+         */
+        @JvmStatic
+        @JvmBlockingBridge
+        public suspend inline fun MessageChain.recall(): Unit = this.source.recall()
+
+        /**
+         * 在一段时间后撤回这条消息.
+         *
+         * @see IMirai.recallMessage
+         */
+        @JvmStatic
+        @Suppress("DeferredIsResult")
+        public fun MessageChain.recallIn(millis: Long): Deferred<Unit> = this.source.recallIn(millis)
+
+        /**
+         * 在一段时间后撤回这条消息.
+         *
+         * @see IMirai.recallMessage
+         */
+        @JvmStatic
+        @Suppress("DeferredIsResult")
+        public fun MessageSource.recallIn(millis: Long): Deferred<Unit> {
+            return bot.async {
+                delay(millis)
+                Mirai.recallMessage(bot, this@recallIn)
+            }
+        }
+
+        /**
+         * 判断是否是发送给群, 或从群接收的消息的消息源
+         */
+        @JvmStatic
+        public fun MessageSource.isAboutGroup(): Boolean {
+            return when (this) {
+                is OnlineMessageSource -> subject is Group
+                is OfflineMessageSource -> kind == MessageSourceKind.GROUP
+            }
+        }
+
+        /**
+         * 判断是否是发送给临时会话, 或从临时会话接收的消息的消息源
+         */
+        @JvmStatic
+        public fun MessageSource.isAboutTemp(): Boolean {
+            return when (this) {
+                is OnlineMessageSource -> subject is Member
+                is OfflineMessageSource -> kind == MessageSourceKind.TEMP
+            }
+        }
+
+        /**
+         * 判断是否是发送给好友, 或从好友接收的消息的消息源
+         */
+        @JvmStatic
+        public inline fun MessageSource.isAboutFriend(): Boolean {
+            return when (this) {
+                is OnlineMessageSource -> subject !is Group && subject !is Member
+                is OfflineMessageSource -> kind == MessageSourceKind.FRIEND
+            }
+        }
+
+        /**
+         * 引用这条消息
+         * @see QuoteReply
+         */
+        @JvmStatic
+        public fun MessageSource.quote(): QuoteReply = QuoteReply(this)
+
+        /**
+         * 引用这条消息. 仅从服务器接收的消息 (即来自 [MessageEvent]) 才可以通过这个方式被引用.
+         * @see QuoteReply
+         */
+        @JvmStatic
+        public fun MessageChain.quote(): QuoteReply = QuoteReply(this.source)
+    }
 }
 
+public inline val MessageSource.bot: Bot
+    get() = when (this) {
+        is OnlineMessageSource -> bot
+        is OfflineMessageSource -> Bot.getInstance(botId)
+    }
+
+public inline val MessageSource.botOrNull: Bot?
+    get() = when (this) {
+        is OnlineMessageSource -> bot
+        is OfflineMessageSource -> Bot.getInstanceOrNull(botId)
+    }
 
 /**
  * 在线消息的 [MessageSource].
- * 拥有对象化的 [sender], [target], 也可以直接 [recall] 和 [quote]
+ * 拥有对象化的 [sender], [target], 也可以直接 [recallMessage] 和 [quote]
  *
  * ### 来源
  * - 当 bot 主动发送消息时, 产生 (由协议模块主动构造) [OnlineMessageSource.Outgoing]
@@ -159,9 +297,13 @@ public sealed class MessageSource : Message, MessageMetadata, ConstrainSingle<Me
  * @see OnlineMessageSource.toOffline 转为 [OfflineMessageSource]
  */
 public sealed class OnlineMessageSource : MessageSource() {
-    public companion object Key : Message.Key<OnlineMessageSource> {
-        public override val typeName: String get() = "OnlineMessageSource"
-    }
+    public companion object Key : AbstractMessageKey<OnlineMessageSource>({ it.safeCast() })
+
+    /**
+     * @see botId
+     */
+    public abstract val bot: Bot
+    final override val botId: Long get() = bot.id
 
     /**
      * 消息发送人. 可能为 [机器人][Bot] 或 [好友][Friend] 或 [群员][Member].
@@ -189,9 +331,8 @@ public sealed class OnlineMessageSource : MessageSource() {
      * 由 [机器人主动发送消息][Contact.sendMessage] 产生的 [MessageSource], 可通过 [MessageReceipt] 获得.
      */
     public sealed class Outgoing : OnlineMessageSource() {
-        public companion object Key : Message.Key<Outgoing> {
-            public override val typeName: String get() = "OnlineMessageSource.Outgoing"
-        }
+        public companion object Key :
+            AbstractPolymorphicMessageKey<MessageSource, Outgoing>(MessageSource, { it.safeCast() })
 
         public abstract override val sender: Bot
         public abstract override val target: Contact
@@ -200,19 +341,15 @@ public sealed class OnlineMessageSource : MessageSource() {
         public final override val targetId: Long get() = target.id
 
         public abstract class ToFriend : Outgoing() {
-            public companion object Key : Message.Key<ToFriend> {
-                public override val typeName: String get() = "OnlineMessageSource.Outgoing.ToFriend"
-            }
+            public companion object Key : AbstractPolymorphicMessageKey<Outgoing, ToFriend>(Outgoing, { it.safeCast() })
 
             public abstract override val target: Friend
             public final override val subject: Friend get() = target
-            //  final override fun toString(): String = "OnlineMessageSource.ToFriend(target=${target.id})"
+            //  final override fun toString(): String = "OnlineMessageSource.ToFriend(target=${target.ids})"
         }
 
         public abstract class ToTemp : Outgoing() {
-            public companion object Key : Message.Key<ToTemp> {
-                public override val typeName: String get() = "OnlineMessageSource.Outgoing.ToTemp"
-            }
+            public companion object Key : AbstractPolymorphicMessageKey<Outgoing, ToTemp>(Outgoing, { it.safeCast() })
 
             public abstract override val target: Member
             public val group: Group get() = target.group
@@ -220,9 +357,7 @@ public sealed class OnlineMessageSource : MessageSource() {
         }
 
         public abstract class ToGroup : Outgoing() {
-            public companion object Key : Message.Key<ToGroup> {
-                public override val typeName: String get() = "OnlineMessageSource.Outgoing.ToGroup"
-            }
+            public companion object Key : AbstractPolymorphicMessageKey<Outgoing, ToGroup>(Outgoing, { it.safeCast() })
 
             public abstract override val target: Group
             public final override val subject: Group get() = target
@@ -233,30 +368,24 @@ public sealed class OnlineMessageSource : MessageSource() {
      * 接收到的一条消息的 [MessageSource]
      */
     public sealed class Incoming : OnlineMessageSource() {
-        public companion object Key : Message.Key<Incoming> {
-            public override val typeName: String get() = "OnlineMessageSource.Incoming"
-        }
-
         public abstract override val sender: User
 
         public final override val fromId: Long get() = sender.id
         public final override val targetId: Long get() = target.id
 
         public abstract class FromFriend : Incoming() {
-            public companion object Key : Message.Key<FromFriend> {
-                public override val typeName: String get() = "OnlineMessageSource.Incoming.FromFriend"
-            }
+            public companion object Key :
+                AbstractPolymorphicMessageKey<Incoming, FromFriend>(Incoming, { it.safeCast() })
 
             public abstract override val sender: Friend
             public final override val subject: Friend get() = sender
             public final override val target: Bot get() = sender.bot
-            // final override fun toString(): String = "OnlineMessageSource.FromFriend(from=${sender.id})"
+            // final override fun toString(): String = "OnlineMessageSource.FromFriend(from=${sender.ids})"
         }
 
         public abstract class FromTemp : Incoming() {
-            public companion object Key : Message.Key<FromTemp> {
-                public override val typeName: String get() = "OnlineMessageSource.Incoming.FromTemp"
-            }
+            public companion object Key :
+                AbstractPolymorphicMessageKey<Incoming, FromTemp>(Incoming, { it.safeCast() })
 
             public abstract override val sender: Member
             public inline val group: Group get() = sender.group
@@ -265,15 +394,17 @@ public sealed class OnlineMessageSource : MessageSource() {
         }
 
         public abstract class FromGroup : Incoming() {
-            public companion object Key : Message.Key<FromGroup> {
-                public override val typeName: String get() = "OnlineMessageSource.Incoming.FromGroup"
-            }
+            public companion object Key :
+                AbstractPolymorphicMessageKey<Incoming, FromGroup>(Incoming, { it.safeCast() })
 
             public abstract override val sender: Member
             public final override val subject: Group get() = sender.group
             public final override val target: Group get() = group
             public inline val group: Group get() = sender.group
         }
+
+        public companion object Key :
+            AbstractPolymorphicMessageKey<MessageSource, FromTemp>(MessageSource, { it.safeCast() })
     }
 }
 
@@ -284,155 +415,100 @@ public sealed class OnlineMessageSource : MessageSource() {
  * @see buildMessageSource 构建一个 [OfflineMessageSource]
  */
 public abstract class OfflineMessageSource : MessageSource() {
-    public companion object Key : Message.Key<OfflineMessageSource> {
-        public override val typeName: String get() = "OfflineMessageSource"
-    }
-
-    public enum class Kind {
-        GROUP,
-        FRIEND,
-        TEMP
-    }
+    public companion object Key :
+        AbstractPolymorphicMessageKey<MessageSource, OfflineMessageSource>(MessageSource, { it.safeCast() })
 
     /**
      * 消息种类
      */
-    public abstract val kind: Kind
+    public abstract val kind: MessageSourceKind
 }
 
-/**
- * 判断是否是发送给群, 或从群接收的消息的消息源
- */
-// inline for future removal
-public inline fun MessageSource.isAboutGroup(): Boolean {
-    return when (this) {
-        is OnlineMessageSource -> subject is Group
-        is OfflineMessageSource -> kind == OfflineMessageSource.Kind.GROUP
+@Serializable
+public enum class MessageSourceKind {
+    GROUP,
+    FRIEND,
+    TEMP
+}
+
+public val MessageSource.kind: MessageSourceKind
+    get() = when (this) {
+        is OnlineMessageSource -> kind
+        is OfflineMessageSource -> kind
     }
-}
 
-/**
- * 判断是否是发送给临时会话, 或从临时会话接收的消息的消息源
- */
-public inline fun MessageSource.isAboutTemp(): Boolean {
-    return when (this) {
-        is OnlineMessageSource -> subject is Member
-        is OfflineMessageSource -> kind == OfflineMessageSource.Kind.TEMP
+public val OnlineMessageSource.kind: MessageSourceKind
+    get() = when {
+        isAboutGroup() -> MessageSourceKind.GROUP
+        isAboutFriend() -> MessageSourceKind.FRIEND
+        isAboutTemp() -> MessageSourceKind.TEMP
+        else -> error("Internal error: OnlineMessageSource.kind reached an unexpected clause")
     }
-}
+
+// For MessageChain, no need to expose to Java.
 
 /**
- * 判断是否是发送给好友, 或从好友接收的消息的消息源
- */
-// inline for future removal
-public inline fun MessageSource.isAboutFriend(): Boolean {
-    return when (this) {
-        is OnlineMessageSource -> subject !is Group && subject !is Member
-        is OfflineMessageSource -> kind == OfflineMessageSource.Kind.FRIEND
-    }
-}
-
-/**
- * 引用这条消息
- * @see QuoteReply
- */
-@JvmSynthetic
-public inline fun MessageSource.quote(): QuoteReply = QuoteReply(this)
-
-/**
- * 引用这条消息. 仅从服务器接收的消息 (即来自 [MessageEvent]) 才可以通过这个方式被引用.
- * @see QuoteReply
- */
-@JvmSynthetic
-public inline fun MessageChain.quote(): QuoteReply = QuoteReply(this.source)
-
-/**
- * 撤回这条消息. 可撤回自己 2 分钟内发出的消息, 和任意时间的群成员的消息.
- *
- * **注意:** 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以撤回.
- *
- * *提示: 若要撤回一条机器人自己发出的消息, 使用 [Contact.sendMessage] 返回的 [MessageReceipt] 中的 [MessageReceipt.recall]*
- *
- * [Bot] 撤回自己的消息不需要权限.
- * [Bot] 撤回群员的消息需要管理员权限.
- *
- * @throws PermissionDeniedException 当 [Bot] 无权限操作时
- * @throws IllegalStateException 当这条消息已经被撤回时 (仅同步主动操作)
- *
- * @see IMirai.recall
- */
-@JvmSynthetic
-public suspend inline fun MessageSource.recall(): Unit = Mirai.recall(bot, this)
-
-// For MessageChain
-
-/**
- * 消息 id.
+ * 消息 ids.
  *
  * 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以获取消息源.
  *
- * @see MessageSource.id
+ * @see MessageSource.ids
  */
 @get:JvmSynthetic
-public val MessageChain.id: Int
-    get() = this.source.id
+public inline val MessageChain.ids: IntArray
+    get() = this.source.ids
 
 /**
- * 消息内部 id.
+ * 消息内部 ids.
  *
  * 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以获取消息源.
  *
- * @see MessageSource.id
+ * @see MessageSource.ids
  */
 @get:JvmSynthetic
-public val MessageChain.internalId: Int
-    get() = this.source.internalId
+public inline val MessageChain.internalId: IntArray
+    get() = this.source.internalIds
 
 /**
  * 消息时间.
  *
  * 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以获取消息源.
  *
- * @see MessageSource.id
+ * @see MessageSource.ids
  */
 @get:JvmSynthetic
-public val MessageChain.time: Int
+public inline val MessageChain.time: Int
     get() = this.source.time
 
 /**
- * 消息内部 id.
+ * 消息内部 ids.
  *
  * 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以获取. 否则将抛出异常 [NoSuchElementException]
  *
- * @see MessageSource.id
+ * @see MessageSource.ids
  */
 @get:JvmSynthetic
-public val MessageChain.bot: Bot
+public inline val MessageChain.bot: Bot
     get() = this.source.bot
 
 /**
  * 获取这条消息的 [消息源][MessageSource].
  *
  * 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以获取消息源, 否则将抛出异常 [NoSuchElementException]
+ *
+ * @see sourceOrNull
  */
 @get:JvmSynthetic
-public val MessageChain.source: MessageSource
+public inline val MessageChain.source: MessageSource
     get() = this.getOrFail(MessageSource)
 
 /**
- * 撤回这条消息. 可撤回自己 2 分钟内发出的消息, 和任意时间的群成员的消息.
+ * 获取这条消息的 [消息源][MessageSource].
  *
- * **注意:** 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以撤回.
+ * 仅从服务器接收的消息 (即来自 [MessageEvent.message]), 或手动添加了 [MessageSource] 元素的 [MessageChain] 才可以获取消息源, 否则返回 `null`
  *
- * *提示: 若要撤回一条机器人自己发出的消息, 使用 [Contact.sendMessage] 返回的 [MessageReceipt] 中的 [MessageReceipt.recall]*
- *
- * [Bot] 撤回自己的消息不需要权限.
- * [Bot] 撤回群员的消息需要管理员权限.
- *
- * @throws PermissionDeniedException 当 [Bot] 无权限操作时
- * @throws IllegalStateException 当这条消息已经被撤回时 (仅同步主动操作)
- *
- * @see IMirai.recall
+ * @see source
  */
-@JvmSynthetic
-public suspend inline fun MessageChain.recall(): Unit = this.source.recall()
+@get:JvmSynthetic
+public inline val MessageChain.sourceOrNull: MessageSource?
+    get() = this[MessageSource]

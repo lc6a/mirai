@@ -11,13 +11,25 @@ package net.mamoe.mirai.utils
 
 import kotlinx.io.core.toByteArray
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import kotlinx.serialization.protobuf.ProtoNumber
 import net.mamoe.mirai.utils.internal.getRandomByteArray
 import net.mamoe.mirai.utils.internal.getRandomIntString
 import net.mamoe.mirai.utils.internal.getRandomString
-import net.mamoe.mirai.utils.internal.md5
-import kotlin.jvm.JvmStatic
+import java.io.File
+
+/**
+ * 加载一个设备信息. 若文件不存在或为空则随机并创建一个设备信息保存.
+ */
+public fun File.loadAsDeviceInfo(json: Json): DeviceInfo {
+    if (!this.exists() || this.length() == 0L) {
+        return DeviceInfo.random().also {
+            this.writeText(json.encodeToString(DeviceInfo.serializer(), it))
+        }
+    }
+    return json.decodeFromString(DeviceInfo.serializer(), this.readText())
+}
 
 @Serializable
 public class DeviceInfo(
@@ -36,8 +48,8 @@ public class DeviceInfo(
     public val simInfo: ByteArray,
     public val osType: ByteArray,
     public val macAddress: ByteArray,
-    public val wifiBSSID: ByteArray?,
-    public val wifiSSID: ByteArray?,
+    public val wifiBSSID: ByteArray,
+    public val wifiSSID: ByteArray,
     public val imsiMd5: ByteArray,
     public val imei: String,
     public val apn: ByteArray
@@ -65,7 +77,7 @@ public class DeviceInfo(
                 model = "mirai".toByteArray(),
                 bootloader = "unknown".toByteArray(),
                 fingerprint = "mamoe/mirai/mirai:10/MIRAI.200122.001/${getRandomIntString(7)}:user/release-keys".toByteArray(),
-                bootId = ExternalImage.generateUUID(getRandomByteArray(16).md5()).toByteArray(),
+                bootId = generateUUID(getRandomByteArray(16).md5()).toByteArray(),
                 procVersion = "Linux version 3.0.31-${getRandomString(8)} (android-build@xxx.xxx.xxx.xxx.com)".toByteArray(),
                 baseBand = byteArrayOf(),
                 version = Version(),

@@ -12,7 +12,6 @@ package net.mamoe.mirai.internal.network.protocol.data.jce
 import kotlinx.serialization.Serializable
 import net.mamoe.mirai.internal.utils.io.JceStruct
 import net.mamoe.mirai.internal.utils.io.serialization.tars.TarsId
-import kotlin.jvm.JvmField
 
 @Serializable
 internal class RequestMSFForceOffline(

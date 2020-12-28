@@ -8,37 +8,26 @@
  */
 package  net.mamoe.mirai.message.data
 
+import net.mamoe.mirai.utils.safeCast
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 
-internal class TestConstrainSingleMessage : ConstrainSingle<TestConstrainSingleMessage>, Any() {
-    companion object Key : Message.Key<TestConstrainSingleMessage> {
-        override val typeName: String
-            get() = "TestMessage"
-    }
+internal class TestConstrainSingleMessage : ConstrainSingle, Any() {
+    companion object Key : AbstractMessageKey<TestConstrainSingleMessage>({ it.safeCast() })
 
     override fun toString(): String = "<TestConstrainSingleMessage#${super.hashCode()}>"
+    override fun contentToString(): String = ""
 
-    override val key: Message.Key<TestConstrainSingleMessage>
+    override val key: MessageKey<TestConstrainSingleMessage>
         get() = Key
 }
 
 
 internal class ConstrainSingleTest {
 
-
-    @Test
-    fun testCombine() {
-        val result = PlainText("te") + PlainText("st")
-        assertTrue(result is CombinedMessage)
-        assertEquals("te", result.left.contentToString())
-        assertEquals("st", result.tail.contentToString())
-        assertEquals(2, result.size)
-        assertEquals("test", result.contentToString())
-    }
 
     @Test
     fun testSinglePlusChain() {
@@ -57,19 +46,10 @@ internal class ConstrainSingleTest {
             add("st")
         }
         val result = TestConstrainSingleMessage() + chain
-        assertSame(chain, result)
+        assertEquals(chain, result)
         assertEquals(2, result.size)
         assertEquals(result.contentToString(), "st")
         assertTrue { result.first() is TestConstrainSingleMessage }
-    }
-
-    @Test
-    fun testSinglePlusSingle() {
-        val new = TestConstrainSingleMessage()
-        val combined = (TestConstrainSingleMessage() + new)
-
-        assertTrue(combined is SingleMessageChainImpl)
-        assertSame(new, combined.delegate)
     }
 
     @Test
@@ -78,7 +58,7 @@ internal class ConstrainSingleTest {
 
         val result = buildMessageChain {
             add(" ")
-            add(Face(Face.hao))
+            add(Face(Face.OK))
             add(TestConstrainSingleMessage())
             add(
                 PlainText("ss")
@@ -92,7 +72,7 @@ internal class ConstrainSingleTest {
 
         assertEquals(7, result.size)
         assertEquals(" [OK]ss p test", result.contentToString())
-        result as MessageChainImplByCollection
+        result as MessageChainImpl
         assertSame(new, result.delegate.toTypedArray()[2])
     }
 

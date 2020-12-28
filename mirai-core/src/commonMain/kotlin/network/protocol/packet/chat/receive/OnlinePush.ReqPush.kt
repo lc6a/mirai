@@ -24,10 +24,11 @@ import net.mamoe.mirai.JavaFriendlyAPI
 import net.mamoe.mirai.Mirai
 import net.mamoe.mirai.contact.Friend
 import net.mamoe.mirai.contact.Member
+import net.mamoe.mirai.contact.NormalMember
 import net.mamoe.mirai.data.FriendInfo
+import net.mamoe.mirai.data.GroupHonorType
+import net.mamoe.mirai.data.FriendInfoImpl
 import net.mamoe.mirai.event.events.*
-import net.mamoe.mirai.getFriendOrNull
-import net.mamoe.mirai.getGroupOrNull
 import net.mamoe.mirai.internal.QQAndroidBot
 import net.mamoe.mirai.internal.contact.*
 import net.mamoe.mirai.internal.network.MultiPacketBySequence
@@ -46,15 +47,10 @@ import net.mamoe.mirai.internal.network.protocol.data.proto.TroopTips0x857
 import net.mamoe.mirai.internal.network.protocol.packet.IncomingPacketFactory
 import net.mamoe.mirai.internal.network.protocol.packet.OutgoingPacket
 import net.mamoe.mirai.internal.network.protocol.packet.buildResponseUniPacket
-import net.mamoe.mirai.internal.utils._miraiContentToString
-import net.mamoe.mirai.internal.utils.encodeToString
+import net.mamoe.mirai.internal.utils.*
 import net.mamoe.mirai.internal.utils.io.ProtoBuf
-import net.mamoe.mirai.internal.utils.io.readString
 import net.mamoe.mirai.internal.utils.io.serialization.*
-import net.mamoe.mirai.internal.utils.read
-import net.mamoe.mirai.internal.utils.toUHexString
-import net.mamoe.mirai.utils.currentTimeSeconds
-import net.mamoe.mirai.utils.debug
+import net.mamoe.mirai.utils.*
 
 
 //0C 01 B1 89 BE 09 5E 3D 72 A6 00 01 73 68 FC 06 00 00 00 3C
@@ -86,10 +82,10 @@ internal object OnlinePushReqPush : IncomingPacketFactory<OnlinePushReqPush.ReqP
         val packets: Sequence<Packet> = reqPushMsg.vMsgInfos.deco(bot.client) { msgInfo ->
             when (msgInfo.shMsgType.toInt()) {
                 732 -> {
-                    val group = bot.getGroupOrNull(readUInt().toLong())
+                    val group = bot.getGroup(readUInt().toLong())
                         ?: return@deco emptySequence() // group has not been initialized
 
-                    GroupImpl.checkIsInstance(group)
+                    group.checkIsGroupImpl()
 
                     val internalType = readByte().toInt()
                     discardExact(1)
@@ -139,9 +135,9 @@ internal object OnlinePushReqPush : IncomingPacketFactory<OnlinePushReqPush.ReqP
             writeJceStruct(
                 RequestPacket.serializer(),
                 RequestPacket(
-                    sServantName = "OnlinePush",
-                    sFuncName = "SvcRespPushMsg",
-                    iRequestId = sequenceId,
+                    servantName = "OnlinePush",
+                    funcName = "SvcRespPushMsg",
+                    requestId = sequenceId,
                     sBuffer = jceRequestSBuffer(
                         "resp",
                         OnlinePushPack.SvcRespPushMsg.serializer(),
@@ -183,7 +179,7 @@ private object Transformers732 : Map<Int, Lambda732> by mapOf(
         if (operatorUin == bot.id) {
             return@lambda732 emptySequence()
         }
-        val operator = group.getOrNull(operatorUin) ?: return@lambda732 emptySequence()
+        val operator = group[operatorUin] ?: return@lambda732 emptySequence()
         readUInt().toLong() // time
         this.discardExact(2)
         val target = readUInt().toLong()
@@ -191,10 +187,10 @@ private object Transformers732 : Map<Int, Lambda732> by mapOf(
 
         if (target == 0L) {
             val new = timeSeconds != 0
-            if (group.settings.isMuteAll == new) {
+            if (group.settings.isMuteAllField == new) {
                 return@lambda732 emptySequence()
             }
-            group._muteAll = new
+            group.settings.isMuteAllField = new
             return@lambda732 sequenceOf(GroupMuteAllEvent(!new, new, group, operator))
         }
 
@@ -207,20 +203,20 @@ private object Transformers732 : Map<Int, Lambda732> by mapOf(
                 }
                 else -> {
                     group.botAsMember.checkIsMemberImpl()._muteTimestamp =
-                        currentTimeSeconds.toInt() + timeSeconds
+                        currentTimeSeconds().toInt() + timeSeconds
                     sequenceOf(BotMuteEvent(timeSeconds, operator))
                 }
             }
         }
 
-        val member = group.getOrNull(target) ?: return@lambda732 emptySequence()
+        val member = group[target] ?: return@lambda732 emptySequence()
         member.checkIsMemberImpl()
 
         if (member.muteTimeRemaining == timeSeconds) {
             return@lambda732 emptySequence()
         }
 
-        member._muteTimestamp = currentTimeSeconds.toInt() + timeSeconds
+        member._muteTimestamp = currentTimeSeconds().toInt() + timeSeconds
         return@lambda732 if (timeSeconds == 0) sequenceOf(MemberUnmuteEvent(member, operator))
         else sequenceOf(MemberMuteEvent(member, timeSeconds, operator))
     },
@@ -228,13 +224,13 @@ private object Transformers732 : Map<Int, Lambda732> by mapOf(
     // anonymous
     0x0e to lambda732 { group: GroupImpl, _: QQAndroidBot ->
         // 匿名
-        val operator = group.getOrNull(readUInt().toLong()) ?: return@lambda732 emptySequence()
+        val operator = group[readUInt().toLong()] ?: return@lambda732 emptySequence()
         val new = readInt() == 0
-        if (group.settings.isAnonymousChatEnabled == new) {
+        if (group.settings.isAnonymousChatEnabledField == new) {
             return@lambda732 emptySequence()
         }
 
-        group._anonymousChat = new
+        group.settings.isAnonymousChatEnabledField = new
         return@lambda732 sequenceOf(GroupAllowAnonymousChatEvent(!new, new, group, operator))
     },
 
@@ -245,7 +241,7 @@ private object Transformers732 : Map<Int, Lambda732> by mapOf(
         val grayTip = readProtoBuf(TroopTips0x857.NotifyMsgBody.serializer()).optGeneralGrayTip
         when (grayTip?.templId) {
             //戳一戳
-            10043L, 1134L, 1135L, 1136L -> {
+            10043L, 1133L, 1132L, 1134L, 1135L, 1136L -> {
                 //预置数据，服务器将不会提供己方已知消息
                 var action = ""
                 var from: Member = group.botAsMember
@@ -257,8 +253,8 @@ private object Transformers732 : Map<Int, Lambda732> by mapOf(
                     run {
                         when (key) {
                             "action_str" -> action = value
-                            "uin_str1" -> from = group[value.toLong()]
-                            "uin_str2" -> target = group[value.toLong()]
+                            "uin_str1" -> from = group[value.toLong()] ?: return@lambda732 emptySequence()
+                            "uin_str2" -> target = group[value.toLong()] ?: return@lambda732 emptySequence()
                             "suffix_str" -> suffix = value
                         }
                     }
@@ -272,6 +268,26 @@ private object Transformers732 : Map<Int, Lambda732> by mapOf(
                     )
                 }
                 return@lambda732 sequenceOf(MemberNudgedEvent(from, target, action, suffix))
+            }
+            //龙王
+            10093L, 1053L, 1054L -> {
+                var now: NormalMember = group.botAsMember
+                var previous: NormalMember? = null
+                grayTip.msgTemplParam.asSequence().map {
+                    it.name.decodeToString() to it.value.decodeToString()
+                }.forEach { (key, value) ->
+                    when (key) {
+                        "uin" -> now = group[value.toLong()] ?: return@lambda732 emptySequence()
+                        "uin_last" -> previous = group[value.toLong()] ?: return@lambda732 emptySequence()
+                    }
+                }
+                return@lambda732 previous?.let {
+                    sequenceOf(
+                        GroupTalkativeChangeEvent(group, now, it),
+                        MemberHonorChangeEvent.Lose(it, GroupHonorType.TALKATIVE),
+                        MemberHonorChangeEvent.Achieve(now, GroupHonorType.TALKATIVE)
+                    )
+                } ?: sequenceOf(MemberHonorChangeEvent.Achieve(now, GroupHonorType.TALKATIVE))
             }
             else -> {
                 bot.network.logger.debug {
@@ -307,10 +323,10 @@ private object Transformers732 : Map<Int, Lambda732> by mapOf(
                     }
                 }
 
-                @Suppress("DEPRECATION")
-                if (group.settings.isConfessTalkEnabled == new) {
-                    return@lambda732 emptySequence()
-                }
+                // @Suppress("DEPRECATION")
+                // if (group.settings.isConfessTalkEnabled == new) {
+                //     return@lambda732 emptySequence()
+                // }
 
                 return@lambda732 sequenceOf(
                     GroupAllowConfessTalkEvent(
@@ -358,23 +374,22 @@ private object Transformers732 : Map<Int, Lambda732> by mapOf(
 
         val operator =
             if (recallReminder.uin == bot.id) group.botAsMember
-            else group.getOrNull(recallReminder.uin) ?: return@lambda732 emptySequence()
+            else group[recallReminder.uin] ?: return@lambda732 emptySequence()
+        val firstPkg = recallReminder.recalledMsgList.firstOrNull() ?: return@lambda732 emptySequence()
 
-        return@lambda732 recallReminder.recalledMsgList.asSequence().mapNotNull { pkg ->
-            when {
-                pkg.authorUin == bot.id && operator.id == bot.id -> null
-                else -> {
-                    MessageRecallEvent.GroupRecall(
-                        bot,
-                        pkg.authorUin,
-                        pkg.seq,
-                        pkg.msgRandom,
-                        pkg.time,
-                        operator,
-                        group
-                    )
-                }
-            }
+        return@lambda732 when {
+            firstPkg.authorUin == bot.id && operator.id == bot.id -> emptySequence()
+            else -> sequenceOf(
+                MessageRecallEvent.GroupRecall(
+                    bot,
+                    firstPkg.authorUin,
+                    recallReminder.recalledMsgList.mapToIntArray { it.seq },
+                    recallReminder.recalledMsgList.mapToIntArray { it.msgRandom },
+                    firstPkg.time,
+                    operator,
+                    group
+                )
+            )
         }
     }
 )
@@ -410,21 +425,29 @@ internal inline fun lambda528(crossinline block: MsgType0x210.(QQAndroidBot, Msg
 /**
  * @see MsgType0x210
  */
+@OptIn(ExperimentalStdlibApi::class)
 internal object Transformers528 : Map<Long, Lambda528> by mapOf(
 
     0x8AL to lambda528 { bot ->
+        @Serializable
+        class Wording(
+            @ProtoNumber(1) val itemID: Int = 0,
+            @ProtoNumber(2) val itemName: String = ""
+        ) : ProtoBuf
+
         @Serializable
         class Sub8AMsgInfo(
             @ProtoNumber(1) val fromUin: Long,
             @ProtoNumber(2) val botUin: Long,
             @ProtoNumber(3) val srcId: Int,
-            @ProtoNumber(4) val srcInternalId: Int,
-            @ProtoNumber(5) val time: Int,
-            @ProtoNumber(6) val random: Int, // 同srcInternalId
+            @ProtoNumber(4) val srcInternalId: Long,
+            @ProtoNumber(5) val time: Long,
+            @ProtoNumber(6) val random: Int,
             @ProtoNumber(7) val pkgNum: Int, // 1
             @ProtoNumber(8) val pkgIndex: Int, // 0
             @ProtoNumber(9) val devSeq: Int, // 0
-            @ProtoNumber(12) val flag: Int // 1
+            @ProtoNumber(12) val flag: Int, // 1
+            @ProtoNumber(13) val wording: Wording
         ) : ProtoBuf
 
         @Serializable
@@ -440,10 +463,10 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
             .filter { it.botUin == bot.id }.map {
                 MessageRecallEvent.FriendRecall(
                     bot = bot,
-                    messageId = it.srcId,
-                    messageInternalId = it.srcInternalId,
-                    messageTime = it.time,
-                    operator = it.fromUin
+                    messageIds = intArrayOf(it.srcId),
+                    messageInternalIds = intArrayOf(it.srcInternalId.toInt()),
+                    messageTime = it.time.toInt(),
+                    operatorId = it.fromUin
                 )
             }
     },
@@ -457,12 +480,14 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
     0xB3L to lambda528 { bot ->
         // 08 01 12 52 08 A2 FF 8C F0 03 10 00 1D 15 3D 90 5E 22 2E E6 88 91 E4 BB AC E5 B7 B2 E7 BB 8F E6 98 AF E5 A5 BD E5 8F 8B E5 95 A6 EF BC 8C E4 B8 80 E8 B5 B7 E6 9D A5 E8 81 8A E5 A4 A9 E5 90 A7 21 2A 09 48 69 6D 31 38 38 6D 6F 65 30 07 38 03 48 DD F1 92 B7 07
         val body = vProtobuf.loadAs(Submsgtype0xb3.SubMsgType0xb3.MsgBody.serializer())
-        val new = Mirai._lowLevelNewFriend(bot, object : FriendInfo {
-            override val uin: Long get() = body.msgAddFrdNotify.fuin
-            override val nick: String get() = body.msgAddFrdNotify.fuinNick
-            override val remark: String get() = ""
-        })
-        bot.friends.delegate.addLast(new)
+        val new = Mirai._lowLevelNewFriend(
+            bot, FriendInfoImpl(
+                uin = body.msgAddFrdNotify.fuin,
+                nick = body.msgAddFrdNotify.fuinNick,
+                remark = "",
+            )
+        )
+        bot.friends.delegate.add(new)
         return@lambda528 sequenceOf(FriendAddEvent(new))
     },
     0xE2L to lambda528 { _ ->
@@ -511,7 +536,7 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
         val body = vProtobuf.loadAs(Submsgtype0x122.Submsgtype0x122.MsgBody.serializer())
         when (body.templId) {
             //戳一戳
-            1134L, 1135L, 1136L, 10043L -> {
+            1132L, 1133L, 1134L, 1135L, 1136L, 10043L -> {
                 //预置数据，服务器将不会提供己方已知消息
                 var from: Friend = bot.asFriend
                 var action = ""
@@ -522,8 +547,8 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
                 }.forEach { (key, value) ->
                     when (key) {
                         "action_str" -> action = value
-                        "uin_str1" -> from = bot.getFriend(value.toLong())
-                        "uin_str2" -> target = bot.getFriend(value.toLong())
+                        "uin_str1" -> from = bot.getFriend(value.toLong()) ?: return@lambda528 emptySequence()
+                        "uin_str2" -> target = bot.getFriend(value.toLong()) ?: return@lambda528 emptySequence()
                         "suffix_str" -> suffix = value
                     }
                 }
@@ -553,7 +578,7 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
     //好友输入状态
     0x115L to lambda528 { bot ->
         val body = vProtobuf.loadAs(Submsgtype0x115.SubMsgType0x115.MsgBody.serializer())
-        val friend = bot.getFriendOrNull(body.fromUin)
+        val friend = bot.getFriend(body.fromUin)
         val item = body.msgNotifyItem
         return@lambda528 if (friend != null && item != null) {
             sequenceOf(FriendInputStatusChangedEvent(friend, item.eventType == 1))
@@ -565,7 +590,7 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
     0x27L to lambda528 { bot ->
         fun ModFriendRemark.transform(bot: QQAndroidBot): Sequence<Packet> {
             return this.msgFrdRmk.asSequence().mapNotNull {
-                val friend = bot.getFriendOrNull(it.fuin) ?: return@mapNotNull null
+                val friend = bot.getFriend(it.fuin) ?: return@mapNotNull null
                 val old: String
                 friend.checkIsFriendImpl().friendInfo.checkIsInfoImpl()
                     .also { info -> old = info.remark }
@@ -577,7 +602,7 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
 
         fun DelFriend.transform(bot: QQAndroidBot): Sequence<Packet> {
             return this.uint64Uins.asSequence().mapNotNull {
-                val friend = bot.getFriendOrNull(it) ?: return@mapNotNull null
+                val friend = bot.getFriend(it) ?: return@mapNotNull null
                 if (bot.friends.delegate.remove(friend)) {
                     FriendDeleteEvent(friend)
                 } else null
@@ -591,16 +616,16 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
                         // 群名
                         val new = info.value.encodeToString()
 
-                        val group = bot.getGroupOrNull(this.groupCode) ?: return@mapNotNull null
+                        val group = bot.getGroup(this.groupCode) ?: return@mapNotNull null
                         group.checkIsGroupImpl()
                         val old = group.name
 
                         if (new == old) return@mapNotNull null
 
                         val operator = if (this.cmdUin == bot.id) null
-                        else group.getOrNull(this.cmdUin) ?: return@mapNotNull null
+                        else group[this.cmdUin] ?: return@mapNotNull null
 
-                        group._name = new
+                        group.settings.nameField = new
 
                         return@mapNotNull GroupNameChangeEvent(old, new, group, operator)
                     }
@@ -644,9 +669,9 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
                 when (info.field) {
                     1 -> { // name card
                         val new = info.value
-                        val group = bot.getGroupOrNull(this.groupCode) ?: return@mapNotNull null
+                        val group = bot.getGroup(this.groupCode) ?: return@mapNotNull null
                         group.checkIsGroupImpl()
-                        val member = group.getOrNull(this.uin) ?: return@mapNotNull null
+                        val member = group[this.uin] ?: return@mapNotNull null
                         member.checkIsMemberImpl()
 
                         val old = member.nameCard
@@ -678,61 +703,51 @@ internal object Transformers528 : Map<Long, Lambda528> by mapOf(
             if (uin == bot.id) {
                 return sequenceOf(BotAvatarChangedEvent(bot))
             }
-            val friend = bot.getFriendOrNull(uin) ?: return emptySequence()
+            val friend = bot.getFriend(uin) ?: return emptySequence()
             return sequenceOf(FriendAvatarChangedEvent(friend))
         }
 
-        fun ModProfile.transform(bot: QQAndroidBot): Sequence<Packet> {
-            return ArrayList<Packet>().apply {
-                var containsUnknown = false
-                msgProfileInfos.forEach { modified ->
-                    when (modified.field) {
-                        20002 -> { // 昵称修改
-                            val value = modified.value
-                            val to = value.encodeToString()
-                            if (uin == bot.id) {
-                                val from = bot.nick
-                                if (from != to) {
-                                    bot.nick = to
-                                    add(BotNickChangedEvent(bot, from, to))
-                                }
-                            } else {
-                                val friend = (bot.getFriendOrNull(uin) ?: return@forEach) as FriendImpl
-                                val info = friend.friendInfo
-                                val from = info.nick
-                                when (info) {
-                                    is FriendInfoImpl -> {
-                                        info.nick = to
-                                    }
-                                    is MemberInfoImpl -> {
-                                        info._nick = to
-                                    }
-                                    else -> {
-                                        bot.network.logger.debug {
-                                            "Unknown how to update nick for $info"
-                                        }
-                                    }
-                                }
-                                add(
-                                    FriendNickChangedEvent(
-                                        friend, from, to
-                                    )
-                                )
+        fun ModProfile.transform(bot: QQAndroidBot): Sequence<Packet> = buildList<Packet> {
+            var containsUnknown = false
+            msgProfileInfos.forEach { modified ->
+                when (modified.field) {
+                    20002 -> { // 昵称修改
+                        val value = modified.value
+                        val to = value.encodeToString()
+                        if (uin == bot.id) {
+                            val from = bot.nick
+                            if (from != to) {
+                                bot.nick = to
+                                bot.asFriend.checkIsFriendImpl().nick = to
+                                add(BotNickChangedEvent(bot, from, to))
                             }
-                        }
-                        else -> {
-                            containsUnknown = true
+                        } else {
+                            val friend = (bot.getFriend(uin) ?: return@forEach) as FriendImpl
+                            val info = friend.friendInfo
+                            val from = info.nick
+                            when (info) {
+                                is FriendInfoImpl -> info.nick = to
+                                is MemberInfoImpl -> info.nick = to
+                                else -> {
+                                    bot.network.logger.debug {
+                                        "Unknown how to update nick for $info"
+                                    }
+                                }
+                            }
+                            add(FriendNickChangedEvent(friend, from, to))
                         }
                     }
-                }
-                if (msgProfileInfos.isEmpty() || containsUnknown) {
-                    bot.network.logger.debug {
-                        "Transformers528 0x27L: new data: ${_miraiContentToString()}"
+                    else -> {
+                        containsUnknown = true
                     }
                 }
-            }.asSequence()
-
-        }
+            }
+            if (msgProfileInfos.isEmpty() || containsUnknown) {
+                bot.network.logger.debug {
+                    "Transformers528 0x27L: new data: ${_miraiContentToString()}"
+                }
+            }
+        }.asSequence()
 
         return@lambda528 vProtobuf.loadAs(SubMsgType0x27MsgBody.serializer()).msgModInfos.asSequence()
             .flatMap {

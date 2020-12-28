@@ -25,16 +25,9 @@ import net.mamoe.mirai.internal.network.protocol.packet.login.Heartbeat
 import net.mamoe.mirai.internal.network.protocol.packet.login.StatSvc
 import net.mamoe.mirai.internal.network.protocol.packet.login.WtLogin
 import net.mamoe.mirai.internal.network.readUShortLVByteArray
-import net.mamoe.mirai.internal.utils.*
-import net.mamoe.mirai.internal.utils.cryptor.TEA
-import net.mamoe.mirai.internal.utils.cryptor.adjustToPublicKey
-import net.mamoe.mirai.internal.utils.io.readPacketExact
-import net.mamoe.mirai.internal.utils.io.readString
-import net.mamoe.mirai.internal.utils.io.useBytes
-import net.mamoe.mirai.internal.utils.io.withUse
+import net.mamoe.mirai.internal.utils.crypto.TEA
+import net.mamoe.mirai.internal.utils.crypto.adjustToPublicKey
 import net.mamoe.mirai.utils.*
-import kotlin.jvm.JvmName
-import kotlin.jvm.JvmOverloads
 
 internal sealed class PacketFactory<TPacket : Packet?> {
     /**
@@ -122,7 +115,7 @@ internal typealias PacketConsumer<T> = suspend (packetFactory: PacketFactory<T>,
  */
 @PublishedApi
 internal val PacketLogger: MiraiLoggerWithSwitch by lazy {
-    DefaultLogger("Packet").withSwitch(false)
+    MiraiLogger.create("Packet").withSwitch(false)
 }
 
 internal object KnownPacketFactories {
@@ -130,11 +123,13 @@ internal object KnownPacketFactories {
         WtLogin.Login,
         StatSvc.Register,
         StatSvc.GetOnlineStatus,
+        StatSvc.GetDevLoginInfo,
         MessageSvcPbGetMsg,
         MessageSvcPushForceOffline,
         MessageSvcPbSendMsg,
         MessageSvcPbDeleteMsg,
         FriendList.GetFriendGroupList,
+        FriendList.DelFriend,
         FriendList.GetTroopListSimplify,
         FriendList.GetTroopMemberList,
         ImgStore.GroupPicUp,
@@ -162,8 +157,10 @@ internal object KnownPacketFactories {
         OnlinePushReqPush,
         OnlinePushPbPushTransMsg,
         MessageSvcPushNotify,
+        MessageSvcPushReaded,
         ConfigPushSvc.PushReq,
-        StatSvc.ReqMSFOffline
+        StatSvc.ReqMSFOffline,
+        StatSvc.SvcReqMSFLoginNotify
     )
     // SvcReqMSFLoginNotify 自己的其他设备上限
     // MessageSvcPushReaded 电脑阅读了别人的消息, 告知手机
@@ -175,7 +172,8 @@ internal object KnownPacketFactories {
             ?: IncomingFactories.firstOrNull { it.receivingCommandName == commandName }
     }
 
-    class PacketFactoryIllegalState10008Exception @JvmOverloads constructor(
+    class PacketFactoryIllegalStateException @JvmOverloads constructor(
+        val code: Int,
         override val message: String? = null,
         override val cause: Throwable? = null
     ) : RuntimeException()
@@ -186,60 +184,59 @@ internal object KnownPacketFactories {
         bot: QQAndroidBot,
         rawInput: ByteReadPacket,
         consumer: PacketConsumer<T>
-    ) =
-        with(rawInput) {
-            // login
-            val flag1 = readInt()
+    ): Unit = with(rawInput) {
+        // login
+        val flag1 = readInt()
 
-            PacketLogger.verbose { "开始处理一个包" }
+        PacketLogger.verbose { "开始处理一个包" }
 
-            val flag2 = readByte().toInt()
-            val flag3 = readByte().toInt()
-            check(flag3 == 0) {
-                "Illegal flag3. Expected 0, whereas got $flag3. flag1=$flag1, flag2=$flag2. " +
-                        "Remaining=${this.readBytes().toUHexString()}"
-            }
+        val flag2 = readByte().toInt()
+        val flag3 = readByte().toInt()
+        check(flag3 == 0) {
+            "Illegal flag3. Expected 0, whereas got $flag3. flag1=$flag1, flag2=$flag2. " +
+                    "Remaining=${this.readBytes().toUHexString()}"
+        }
 
-            readString(readInt() - 4)// uinAccount
+        readString(readInt() - 4)// uinAccount
 
-            @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
-            ByteArrayPool.useInstance(this.remaining.toInt()) { data ->
-                val size = this.readAvailable(data)
+        @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
+        ByteArrayPool.useInstance(this.remaining.toInt()) { data ->
+            val size = this.readAvailable(data)
 
-                kotlin.runCatching {
-                    when (flag2) {
-                        2 -> TEA.decrypt(data, DECRYPTER_16_ZERO, size)
-                        1 -> TEA.decrypt(data, bot.client.wLoginSigInfo.d2Key, size)
-                        0 -> data
-                        else -> error("")
-                    }
-                }.getOrElse {
-                    bot.client.tryDecryptOrNull(data, size) { it }
-                }?.toReadPacket()?.let { decryptedData ->
-                    when (flag1) {
-                        0x0A -> parseSsoFrame(bot, decryptedData)
-                        0x0B -> parseSsoFrame(bot, decryptedData) // 这里可能是 uni?? 但测试时候发现结构跟 sso 一样.
-                        else -> error("unknown flag1: ${flag1.toByte().toUHexString()}")
-                    }
-                }?.let {
-                    it as IncomingPacket<T>
-
-                    if (it.packetFactory is IncomingPacketFactory<T> && it.packetFactory.canBeCached && bot.network.pendingEnabled) {
-                        @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
-                        bot.network.pendingIncomingPackets?.addLast(it.also {
-                            it.consumer = consumer
-                            it.flag2 = flag2
-                            PacketLogger.info { "Cached ${it.commandName} #${it.sequenceId}" }
-                        }) ?: handleIncomingPacket(it, bot, flag2, consumer)
-                    } else {
-                        handleIncomingPacket(it, bot, flag2, consumer)
-                    }
-                } ?: kotlin.run {
-                    PacketLogger.error { "任何key都无法解密: ${data.take(size).toUHexString()}" }
-                    return
+            kotlin.runCatching {
+                when (flag2) {
+                    2 -> TEA.decrypt(data, DECRYPTER_16_ZERO, size)
+                    1 -> TEA.decrypt(data, bot.client.wLoginSigInfo.d2Key, size)
+                    0 -> data
+                    else -> error("")
                 }
+            }.getOrElse {
+                bot.client.tryDecryptOrNull(data, size) { it }
+            }?.toReadPacket()?.let { decryptedData ->
+                when (flag1) {
+                    0x0A -> parseSsoFrame(bot, decryptedData)
+                    0x0B -> parseSsoFrame(bot, decryptedData) // 这里可能是 uni?? 但测试时候发现结构跟 sso 一样.
+                    else -> error("unknown flag1: ${flag1.toByte().toUHexString()}")
+                }
+            }?.let {
+                it as IncomingPacket<T>
+
+                if (it.packetFactory is IncomingPacketFactory<T> && it.packetFactory.canBeCached && bot.network.pendingEnabled) {
+                    @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
+                    bot.network.pendingIncomingPackets?.add(it.also {
+                        it.consumer = consumer
+                        it.flag2 = flag2
+                        PacketLogger.info { "Cached ${it.commandName} #${it.sequenceId}" }
+                    }) ?: handleIncomingPacket(it, bot, flag2, consumer)
+                } else {
+                    handleIncomingPacket(it, bot, flag2, consumer)
+                }
+            } ?: kotlin.run {
+                PacketLogger.error { "任何key都无法解密: ${data.take(size).toUHexString()}" }
+                return
             }
         }
+    }
 
     internal suspend fun <T : Packet?> handleIncomingPacket(
         it: IncomingPacket<T>,
@@ -313,8 +310,9 @@ internal object KnownPacketFactories {
 
             val returnCode = readInt()
             check(returnCode == 0) {
-                if (returnCode == -10008) { // https://github.com/mamoe/mirai/issues/470
-                    throw PacketFactoryIllegalState10008Exception("returnCode = $returnCode")
+                if (returnCode <= -10000) {
+                    // https://github.com/mamoe/mirai/issues/470
+                    throw PacketFactoryIllegalStateException(returnCode, "returnCode = $returnCode")
                 } else "returnCode = $returnCode"
             }
 
@@ -346,7 +344,7 @@ internal object KnownPacketFactories {
             1 -> {
                 input.discardExact(4)
                 input.useBytes { data, length ->
-                    MiraiPlatformUtils.unzip(data, 0, length).let {
+                    data.unzip(0, length).let {
                         val size = it.toInt()
                         if (size == it.size || size == it.size + 4) {
                             it.toReadPacket(offset = 4)

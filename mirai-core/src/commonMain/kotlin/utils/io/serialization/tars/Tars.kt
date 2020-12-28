@@ -20,7 +20,6 @@ import kotlinx.serialization.modules.SerializersModule
 import net.mamoe.mirai.internal.utils.io.serialization.tars.internal.TarsDecoder
 import net.mamoe.mirai.internal.utils.io.serialization.tars.internal.TarsInput
 import net.mamoe.mirai.internal.utils.io.serialization.tars.internal.TarsOld
-import kotlin.jvm.JvmStatic
 
 /**
  * The main entry point to work with Tars serialization.

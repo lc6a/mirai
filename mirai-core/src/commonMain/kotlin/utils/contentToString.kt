@@ -12,12 +12,15 @@
 package net.mamoe.mirai.internal.utils
 
 import kotlinx.serialization.Transient
-import net.mamoe.mirai.utils.DefaultLogger
+import net.mamoe.mirai.utils.MiraiLogger
 import net.mamoe.mirai.utils.debug
+import net.mamoe.mirai.utils.toUHexString
+import java.lang.reflect.Modifier
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty
 import kotlin.reflect.KProperty1
-import kotlin.reflect.KType
+import kotlin.reflect.full.hasAnnotation
+import kotlin.reflect.jvm.javaField
 
 
 private val indent: String = " ".repeat(4)
@@ -29,7 +32,7 @@ private fun <T> Sequence<T>.joinToStringPrefixed(prefix: String, transform: (T) 
     return this.joinToString(prefix = "$prefix$indent", separator = "\n$prefix$indent", transform = transform)
 }
 
-private val SoutvLogger by lazy { DefaultLogger("soutv") }
+private val SoutvLogger by lazy { MiraiLogger.create("soutv") }
 internal fun Any?.soutv(name: String = "unnamed") {
     @Suppress("DEPRECATION")
     SoutvLogger.debug { "$name = ${this._miraiContentToString()}" }
@@ -133,15 +136,9 @@ internal fun Any?._miraiContentToString(prefix: String = ""): String = when (thi
     }
 }
 
-internal expect fun KProperty1<*, *>.getValueAgainstPermission(receiver: Any): Any?
-
-@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
-private val KProperty1<*, *>.isConst: Boolean
-    get() = false // on JVM, it will be resolved to member function
-
-@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
-private val KClass<*>.isData: Boolean
-    get() = false // on JVM, it will be resolved to member function
+internal fun KProperty1<*, *>.getValueAgainstPermission(receiver: Any): Any? {
+    return this.javaField?.apply { isAccessible = true }?.get(receiver)
+}
 
 private fun Any.canBeIgnored(): Boolean {
     return when (this) {
@@ -192,11 +189,6 @@ private fun Any.contentToStringReflectively(
                 }.lines().filterNot { it.isBlank() }.joinToString("\n") + "\n$prefix}"
 }
 
-// on JVM, it will be resolved to member function
-@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
-private val <T : Any> KClass<T>.supertypes: List<KType>
-    get() = listOf()
-
 private fun KClass<out Any>.thisClassAndSuperclassSequence(): Sequence<KClass<out Any>> {
     return sequenceOf(this) +
             this.supertypes.asSequence()
@@ -204,11 +196,6 @@ private fun KClass<out Any>.thisClassAndSuperclassSequence(): Sequence<KClass<ou
                     type.classifier?.takeIf { it is KClass<*> }?.takeIf { it != Any::class } as? KClass<out Any>
                 }.flatMap { it.thisClassAndSuperclassSequence() }
 }
-
-// on JVM, it will be resolved to member function
-@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
-private val <T : Any> KClass<T>.members: List<KProperty<*>>
-    get() = listOf()
 
 @Suppress("UNCHECKED_CAST")
 private fun Any.allMembersFromSuperClassesMatching(classFilter: (KClass<out Any>) -> Boolean): Sequence<KProperty1<Any, *>> {
@@ -222,8 +209,6 @@ private fun Any.allMembersFromSuperClassesMatching(classFilter: (KClass<out Any>
         .mapNotNull { it as KProperty1<Any, *> }
 }
 
-@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
-internal expect inline fun <reified T : Annotation> KProperty<*>.hasAnnotation(): Boolean
+internal fun KProperty<*>.isTransient(): Boolean =
+    javaField?.modifiers?.and(Modifier.TRANSIENT) != 0
 
-@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
-internal expect fun KProperty<*>.isTransient(): Boolean

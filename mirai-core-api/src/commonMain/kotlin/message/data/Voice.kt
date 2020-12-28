@@ -9,20 +9,21 @@
 
 package net.mamoe.mirai.message.data
 
+import kotlinx.serialization.Serializable
 import net.mamoe.mirai.utils.MiraiExperimentalApi
 import net.mamoe.mirai.utils.MiraiInternalApi
-import net.mamoe.mirai.utils.SinceMirai
+import net.mamoe.mirai.utils.safeCast
+
 
 /**
  * 需要通过上传到服务器的消息，如语音、文件
  */
+@Serializable
 @MiraiExperimentalApi
 public abstract class PttMessage : MessageContent {
 
-    public companion object Key : Message.Key<PttMessage> {
-        public override val typeName: String
-            get() = "PttMessage"
-    }
+    public companion object Key :
+        AbstractPolymorphicMessageKey<MessageContent, PttMessage>(MessageContent, { it.safeCast() })
 
     public abstract val fileName: String
     public abstract val md5: ByteArray
@@ -33,18 +34,17 @@ public abstract class PttMessage : MessageContent {
 /**
  * 语音消息, 目前只支持接收和转发
  */
-@SinceMirai("1.2.0")
+@Serializable // experimental
 public class Voice @MiraiInternalApi constructor(
     public override val fileName: String,
     public override val md5: ByteArray,
     public override val fileSize: Long,
+
+    @MiraiInternalApi public val codec: Int = 0,
     private val _url: String
 ) : PttMessage() {
 
-    public companion object Key : Message.Key<Voice> {
-        override val typeName: String
-            get() = "Voice"
-    }
+    public companion object Key : AbstractPolymorphicMessageKey<PttMessage, Voice>(PttMessage, { it.safeCast() })
 
     public val url: String?
         get() = when {

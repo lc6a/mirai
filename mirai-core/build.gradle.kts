@@ -9,6 +9,7 @@
 
 @file:Suppress("UNUSED_VARIABLE")
 
+import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSet
 
 plugins {
@@ -24,6 +25,14 @@ plugins {
 description = "Mirai Protocol implementation for QQ Android"
 
 val isAndroidSDKAvailable: Boolean by project
+
+afterEvaluate {
+    tasks.getByName("compileKotlinCommon").enabled = false
+    tasks.getByName("compileTestKotlinCommon").enabled = false
+
+    tasks.getByName("compileCommonMainKotlinMetadata").enabled = false
+    tasks.getByName("compileKotlinMetadata").enabled = false
+}
 
 kotlin {
     if (isAndroidSDKAvailable) {
@@ -46,26 +55,19 @@ kotlin {
         )
     }
 
-    jvm("jvm") {
-        withJava()
+    jvm("common") {
+        attributes.attribute(KotlinPlatformType.attribute, KotlinPlatformType.common)
     }
+
+    jvm("jvm")
+
+    /*
+    jvm("android") {
+        attributes.attribute(ATTRIBUTE_MIRAI_TARGET_PLATFORM, "android")
+    }*/
 
     sourceSets.apply {
         all {
-            languageSettings.enableLanguageFeature("InlineClasses")
-            languageSettings.useExperimentalAnnotation("kotlin.Experimental")
-            languageSettings.useExperimentalAnnotation("net.mamoe.mirai.utils.MiraiInternalAPI")
-            languageSettings.useExperimentalAnnotation("net.mamoe.mirai.utils.MiraiExperimentalAPI")
-            languageSettings.useExperimentalAnnotation("net.mamoe.mirai.LowLevelAPI")
-            languageSettings.useExperimentalAnnotation("kotlin.ExperimentalUnsignedTypes")
-            languageSettings.useExperimentalAnnotation("kotlin.experimental.ExperimentalTypeInference")
-            languageSettings.useExperimentalAnnotation("kotlin.time.ExperimentalTime")
-            languageSettings.useExperimentalAnnotation("kotlin.contracts.ExperimentalContracts")
-            languageSettings.useExperimentalAnnotation("kotlinx.serialization.ExperimentalSerializationApi")
-            languageSettings.useExperimentalAnnotation("net.mamoe.mirai.utils.UnstableExternalImage")
-
-            languageSettings.progressiveMode = true
-
             dependencies {
                 api(project(":mirai-core-api"))
             }
@@ -73,7 +75,9 @@ kotlin {
 
         commonMain {
             dependencies {
+                implementation(project(":mirai-core-utils"))
                 api1(`kotlinx-serialization-core`)
+                api1(`kotlinx-serialization-json`)
                 implementation1(`kotlinx-serialization-protobuf`)
 
                 api1(`kotlinx-atomicfu`)
@@ -117,6 +121,7 @@ kotlin {
         jvmTest {
             dependencies {
                 implementation("org.pcap4j:pcap4j-distribution:1.8.2")
+                implementation("net.mamoe:mirai-login-solver-selenium:1.0-dev-5")
             }
         }
     }

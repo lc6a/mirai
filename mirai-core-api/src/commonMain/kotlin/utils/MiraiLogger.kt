@@ -14,25 +14,8 @@
 package net.mamoe.mirai.utils
 
 import net.mamoe.mirai.Bot
-import kotlin.jvm.JvmMultifileClass
-import kotlin.jvm.JvmName
-import kotlin.jvm.JvmOverloads
-
-
-/**
- * 用于创建默认的日志记录器. 在一些需要使用日志的 Mirai 的组件, 如 [Bot], 都会通过这个函数构造日志记录器.
- *
- * 可直接修改这个变量的值来重定向日志输出.
- *
- * **注意:** 请务必将所有的输出定向到日志记录系统, 否则在某些情况下 (如 web 控制台中) 将无法接收到输出
- *
- * **注意:** 请为日志做好分类, 即不同的模块使用不同的 [MiraiLogger].
- * 如, [Bot] 中使用 `identity` 为 "Bot(qqId)" 的 [MiraiLogger]
- * 而 [Bot] 的网络处理中使用 `identity` 为 "BotNetworkHandler".
- *
- * Java 调用: `Utils.getDefaultLogger().invoke(identity)`
- */
-public var DefaultLogger: (identity: String?) -> MiraiLogger = { PlatformLogger(it) }
+import kotlin.contracts.InvocationKind.AT_MOST_ONCE
+import kotlin.contracts.contract
 
 /**
  * 给这个 logger 添加一个开关, 用于控制是否记录 log
@@ -57,14 +40,42 @@ public fun MiraiLogger.withSwitch(default: Boolean = true): MiraiLoggerWithSwitc
  * @see MiraiLoggerPlatformBase 平台通用基础实现. 若 Mirai 自带的日志系统无法满足需求, 请继承这个类并实现其抽象函数.
  */
 public interface MiraiLogger {
-    /**
-     * 顶层日志记录器.
-     *
-     * 顶层日志会导致混乱并难以定位问题. 请自行构造 logger 实例并使用.
-     * 请参考使用 [DefaultLogger]
-     */
-    @Deprecated(message = "顶层日志会导致混乱并难以定位问题. 请自行构造 logger 实例并使用.", level = DeprecationLevel.WARNING)
-    public companion object : MiraiLogger by DefaultLogger("Mirai")
+
+    public companion object {
+        /**
+         * 顶层日志, 仅供 Mirai 内部使用.
+         */
+        @MiraiInternalApi
+        @MiraiExperimentalApi
+        public val TopLevel: MiraiLogger by lazy { create("Mirai") }
+
+        @Volatile
+        private var defaultLogger: (identity: String?) -> MiraiLogger = { PlatformLogger(it) }
+
+        /**
+         * 可直接修改这个变量的值来重定向日志输出.
+         */
+        @JvmStatic
+        public fun setDefaultLoggerCreator(creator: (identity: String?) -> MiraiLogger) {
+            defaultLogger = creator
+        }
+
+        /**
+         * 用于创建默认的日志记录器. 在一些需要使用日志的 Mirai 的组件, 如 [Bot], 都会通过这个函数构造日志记录器.
+         *
+         * **注意:** 请务必将所有的输出定向到日志记录系统, 否则在某些情况下 (如 web 控制台中) 将无法接收到输出
+         *
+         * **注意:** 请为日志做好分类, 即不同的模块使用不同的 [MiraiLogger].
+         * 如, [Bot] 中使用 `identity` 为 "Bot(qqId)" 的 [MiraiLogger]
+         * 而 [Bot] 的网络处理中使用 `identity` 为 "BotNetworkHandler".
+         *
+         * @see setDefaultLoggerCreator
+         */
+        @JvmStatic
+        public fun create(identity: String?): MiraiLogger {
+            return defaultLogger.invoke(identity)
+        }
+    }
 
     /**
      * 日志的标记. 在 Mirai 中, identity 可为
@@ -147,63 +158,66 @@ public interface MiraiLogger {
      * 添加一个 [follower], 返回 [follower]
      * 它只会把 `this` 的属性 [MiraiLogger.follower] 修改为这个函数的参数 [follower], 然后返回这个参数.
      * 若 [MiraiLogger.follower] 已经有值, 则会替换掉这个值.
-     *
+     * ```
      *   +------+      +----------+      +----------+      +----------+
      *   | base | <--  | follower | <--  | follower | <--  | follower |
      *   +------+      +----------+      +----------+      +----------+
+     * ```
      *
      * @return [follower]
      */
     public operator fun <T : MiraiLogger> plus(follower: T): T
-
-    /**
-     * 添加一个 [follower]
-     * 若 [MiraiLogger.follower] 已经有值, 则会对这个值调用 [plusAssign]. 即会在日志记录器链的末尾添加这个参数 [follower]
-     *
-     * @see follower
-     */
-    public operator fun plusAssign(follower: MiraiLogger)
 }
 
 
-public inline fun MiraiLogger.verbose(lazyMessage: () -> String) {
-    if (isEnabled) verbose(lazyMessage())
+public inline fun MiraiLogger.verbose(message: () -> String) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) verbose(message())
 }
 
-public inline fun MiraiLogger.verbose(lazyMessage: () -> String, e: Throwable?) {
-    if (isEnabled) verbose(lazyMessage(), e)
+public inline fun MiraiLogger.verbose(message: () -> String, e: Throwable?) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) verbose(message(), e)
 }
 
-public inline fun MiraiLogger.debug(lazyMessage: () -> String?) {
-    if (isEnabled) debug(lazyMessage())
+public inline fun MiraiLogger.debug(message: () -> String?) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) debug(message())
 }
 
-public inline fun MiraiLogger.debug(lazyMessage: () -> String?, e: Throwable?) {
-    if (isEnabled) debug(lazyMessage(), e)
+public inline fun MiraiLogger.debug(message: () -> String?, e: Throwable?) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) debug(message(), e)
 }
 
-public inline fun MiraiLogger.info(lazyMessage: () -> String?) {
-    if (isEnabled) info(lazyMessage())
+public inline fun MiraiLogger.info(message: () -> String?) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) info(message())
 }
 
-public inline fun MiraiLogger.info(lazyMessage: () -> String?, e: Throwable?) {
-    if (isEnabled) info(lazyMessage(), e)
+public inline fun MiraiLogger.info(message: () -> String?, e: Throwable?) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) info(message(), e)
 }
 
-public inline fun MiraiLogger.warning(lazyMessage: () -> String?) {
-    if (isEnabled) warning(lazyMessage())
+public inline fun MiraiLogger.warning(message: () -> String?) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) warning(message())
 }
 
-public inline fun MiraiLogger.warning(lazyMessage: () -> String?, e: Throwable?) {
-    if (isEnabled) warning(lazyMessage(), e)
+public inline fun MiraiLogger.warning(message: () -> String?, e: Throwable?) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) warning(message(), e)
 }
 
-public inline fun MiraiLogger.error(lazyMessage: () -> String?) {
-    if (isEnabled) error(lazyMessage())
+public inline fun MiraiLogger.error(message: () -> String?) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) error(message())
 }
 
-public inline fun MiraiLogger.error(lazyMessage: () -> String?, e: Throwable?) {
-    if (isEnabled) error(lazyMessage(), e)
+public inline fun MiraiLogger.error(message: () -> String?, e: Throwable?) {
+    contract { callsInPlace(message, AT_MOST_ONCE) }
+    if (isEnabled) error(message(), e)
 }
 
 /**
@@ -227,9 +241,16 @@ public inline fun MiraiLogger.error(lazyMessage: () -> String?, e: Throwable?) {
  *
  * 严重程度为 V, I, W, E. 分别对应 verbose, info, warning, error
  *
- * @see DefaultLogger
+ * @see MiraiLogger.create
  */
-public expect open class PlatformLogger @JvmOverloads constructor(identity: String? = "Mirai") : MiraiLoggerPlatformBase
+@MiraiInternalApi
+public expect open class PlatformLogger constructor(
+    identity: String? = "Mirai",
+    output: (String) -> Unit, // TODO: 2020/11/30 review logs, currently it's just for compile
+) : MiraiLoggerPlatformBase {
+    @JvmOverloads
+    public constructor(identity: String? = "Mirai")
+}
 
 
 /**
@@ -428,8 +449,4 @@ public abstract class MiraiLoggerPlatformBase : MiraiLogger {
         this.follower = follower
         return follower
     }
-
-    public override fun plusAssign(follower: MiraiLogger): Unit =
-        if (this.follower == null) this.follower = follower
-        else this.follower!! += follower
 }

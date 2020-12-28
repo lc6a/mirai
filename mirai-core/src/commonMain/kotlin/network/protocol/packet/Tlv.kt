@@ -16,11 +16,11 @@ import kotlinx.io.core.ByteReadPacket
 import kotlinx.io.core.toByteArray
 import kotlinx.io.core.writeFully
 import net.mamoe.mirai.internal.network.protocol.LoginType
-import net.mamoe.mirai.internal.utils.MiraiPlatformUtils
 import net.mamoe.mirai.internal.utils.NetworkType
 import net.mamoe.mirai.internal.utils.io.*
-import net.mamoe.mirai.internal.utils.toByteArray
 import net.mamoe.mirai.utils.currentTimeMillis
+import net.mamoe.mirai.utils.md5
+import net.mamoe.mirai.utils.toByteArray
 import kotlin.random.Random
 
 /**
@@ -35,7 +35,7 @@ internal fun BytePacketBuilder.t1(uin: Long, ip: ByteArray) {
         writeShort(1) // _ip_ver
         writeInt(Random.nextInt())
         writeInt(uin.toInt())
-        writeInt(currentTimeMillis.toInt())
+        writeInt(currentTimeMillis().toInt())
         writeFully(ip)
         writeShort(0)
     } shouldEqualsTo 20
@@ -92,7 +92,8 @@ internal fun BytePacketBuilder.t106(
     tgtgtKey: ByteArray,
     isGuidAvailable: Boolean = true,
     guid: ByteArray?,
-    loginType: LoginType
+    loginType: LoginType,
+    ssoVersion: Int,
 ) {
     writeShort(0x106)
     passwordMd5.requireSize(16)
@@ -100,10 +101,13 @@ internal fun BytePacketBuilder.t106(
     guid?.requireSize(16)
 
     writeShortLVPacket {
-        encryptAndWrite(MiraiPlatformUtils.md5(passwordMd5 + ByteArray(4) + (salt.takeIf { it != 0L } ?: uin).toInt().toByteArray())) {
+        encryptAndWrite(
+            (passwordMd5 + ByteArray(4) + (salt.takeIf { it != 0L } ?: uin).toInt()
+                .toByteArray()).md5()
+        ) {
             writeShort(4)//TGTGTVer
             writeInt(Random.nextInt())
-            writeInt(5)//ssoVer
+            writeInt(ssoVersion)//ssoVer
             writeInt(appId.toInt())
             writeInt(appClientVersion)
 
@@ -113,12 +117,12 @@ internal fun BytePacketBuilder.t106(
                 writeLong(uin)
             }
 
-            writeInt(currentTimeMillis.toInt())
+            writeInt(currentTimeMillis().toInt())
             writeFully(ByteArray(4)) // ip // no need to write actual ip
             writeByte(isSavePassword.toByte())
             writeFully(passwordMd5)
             writeFully(tgtgtKey)
-            writeInt(0)
+            writeInt(0) // wtf
             writeByte(isGuidAvailable.toByte())
             if (isGuidAvailable) {
                 require(guid != null) { "Guid must not be null when isGuidAvailable==true" }
@@ -159,16 +163,18 @@ internal fun BytePacketBuilder.t116(
 internal fun BytePacketBuilder.t100(
     appId: Long = 16,
     subAppId: Long,
-    appClientVersion: Int
+    appClientVersion: Int,
+    ssoVersion: Int,
+    mainSigMap: Int
 ) {
     writeShort(0x100)
     writeShortLVPacket {
         writeShort(1)//db_buf_ver
-        writeInt(5)//sso_ver
+        writeInt(ssoVersion)//sso_ver
         writeInt(appId.toInt())
         writeInt(subAppId.toInt())
         writeInt(appClientVersion)
-        writeInt(34869472) // sigMap, 34869472?
+        writeInt(mainSigMap) // sigMap, 34869472?
     } shouldEqualsTo 22
 }
 
@@ -190,7 +196,7 @@ internal fun BytePacketBuilder.t107(
 internal fun BytePacketBuilder.t108(
     ksid: ByteArray
 ) {
-    require(ksid.size == 16) { "ksid should length 16" }
+    // require(ksid.size == 16) { "ksid should length 16" }
     writeShort(0x108)
     writeShortLVPacket {
         writeFully(ksid)
@@ -331,7 +337,7 @@ internal fun BytePacketBuilder.t109(
 ) {
     writeShort(0x109)
     writeShortLVPacket {
-        writeFully(MiraiPlatformUtils.md5(androidId))
+        writeFully(androidId.md5())
     } shouldEqualsTo 16
 }
 
@@ -555,7 +561,7 @@ internal fun BytePacketBuilder.t400(
             writeFully(dpwd)
             writeInt(appId.toInt())
             writeInt(subAppId.toInt())
-            writeLong(currentTimeMillis)
+            writeLong(currentTimeMillis())
             writeFully(randomSeed)
         }
     }
@@ -567,7 +573,7 @@ internal fun BytePacketBuilder.t187(
 ) {
     writeShort(0x187)
     writeShortLVPacket {
-        writeFully(MiraiPlatformUtils.md5(macAddress)) // may be md5
+        writeFully(macAddress.md5()) // may be md5
     }
 }
 
@@ -577,7 +583,7 @@ internal fun BytePacketBuilder.t188(
 ) {
     writeShort(0x188)
     writeShortLVPacket {
-        writeFully(MiraiPlatformUtils.md5(androidId))
+        writeFully(androidId.md5())
     } shouldEqualsTo 16
 }
 
@@ -668,6 +674,16 @@ internal fun BytePacketBuilder.t521( // 1313
     } shouldEqualsTo 6
 }
 
+internal fun BytePacketBuilder.t52c(
+    // ?
+) {
+    writeShort(0x52c)
+    writeShortLVPacket {
+        writeByte(1)
+        writeLong(-1)
+    }
+}
+
 internal fun BytePacketBuilder.t536( // 1334
     loginExtraData: ByteArray
 ) {
@@ -702,4 +718,5 @@ private inline fun Boolean.toInt(): Int = if (this) 1 else 0
 // noinline: wrong exception stacktrace reported
 
 private infix fun Int.shouldEqualsTo(int: Int) = check(this == int) { "Required $int, but found $this" }
-private infix fun ByteArray.requireSize(exactSize: Int) = check(this.size == exactSize) { "Required size $exactSize, but found ${this.size}" }
+private infix fun ByteArray.requireSize(exactSize: Int) =
+    check(this.size == exactSize) { "Required size $exactSize, but found ${this.size}" }

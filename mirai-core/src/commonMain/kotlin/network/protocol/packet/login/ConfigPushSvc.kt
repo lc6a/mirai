@@ -10,7 +10,6 @@
 package net.mamoe.mirai.internal.network.protocol.packet.login
 
 import kotlinx.io.core.ByteReadPacket
-import kotlinx.io.core.use
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.protobuf.ProtoNumber
 import net.mamoe.mirai.event.AbstractEvent
@@ -23,13 +22,13 @@ import net.mamoe.mirai.internal.network.protocol.data.jce.RequestPacket
 import net.mamoe.mirai.internal.network.protocol.packet.IncomingPacketFactory
 import net.mamoe.mirai.internal.network.protocol.packet.OutgoingPacket
 import net.mamoe.mirai.internal.network.protocol.packet.buildResponseUniPacket
-import net.mamoe.mirai.internal.utils.ByteArrayPool
-import net.mamoe.mirai.internal.utils.hexToBytes
 import net.mamoe.mirai.internal.utils.io.ProtoBuf
-import net.mamoe.mirai.internal.utils.io.serialization.*
-import net.mamoe.mirai.internal.utils.io.withUse
-import net.mamoe.mirai.internal.utils.toReadPacket
-import net.mamoe.mirai.utils.verbose
+import net.mamoe.mirai.internal.utils.io.serialization.jceRequestSBuffer
+import net.mamoe.mirai.internal.utils.io.serialization.loadAs
+import net.mamoe.mirai.internal.utils.io.serialization.readProtoBuf
+import net.mamoe.mirai.internal.utils.io.serialization.readUniPacket
+import net.mamoe.mirai.internal.utils.io.serialization.writeJceStruct
+import net.mamoe.mirai.utils.*
 import net.mamoe.mirai.internal.network.protocol.data.jce.PushReq as PushReqJceStruct
 
 
@@ -245,10 +244,10 @@ msfwifi.3g.qq.com ?
                         writeJceStruct(
                             RequestPacket.serializer(),
                             RequestPacket(
-                                iRequestId = 0,
-                                iVersion = 3,
-                                sServantName = "QQService.ConfigPushSvc.MainServant",
-                                sFuncName = "PushResp",
+                                requestId = 0,
+                                version = 3,
+                                servantName = "QQService.ConfigPushSvc.MainServant",
+                                funcName = "PushResp",
                                 sBuffer = jceRequestSBuffer(
                                     "PushResp",
                                     PushResp.serializer(),

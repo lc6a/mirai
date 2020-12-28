@@ -11,53 +11,121 @@
 
 package net.mamoe.mirai.internal.message
 
-import net.mamoe.mirai.Bot
-import net.mamoe.mirai.event.internal.MiraiAtomicBoolean
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import net.mamoe.mirai.internal.network.protocol.data.proto.ImMsgBody
 import net.mamoe.mirai.internal.network.protocol.data.proto.MsgComm
 import net.mamoe.mirai.internal.network.protocol.data.proto.SourceMsg
 import net.mamoe.mirai.internal.network.protocol.packet.EMPTY_BYTE_ARRAY
 import net.mamoe.mirai.internal.utils.io.serialization.loadAs
 import net.mamoe.mirai.message.data.MessageChain
+import net.mamoe.mirai.message.data.MessageSourceKind
 import net.mamoe.mirai.message.data.OfflineMessageSource
+import net.mamoe.mirai.utils.mapToIntArray
+import java.util.concurrent.atomic.AtomicBoolean
 
-
-internal class OfflineMessageSourceImplByMsg(
-    // from other sources' originalMessage
-    val delegate: MsgComm.Msg,
-    override val bot: Bot
+@Serializable
+internal data class OfflineMessageSourceImplData(
+    override val kind: MessageSourceKind,
+    override val ids: IntArray,
+    override val botId: Long,
+    override val time: Int,
+    override val fromId: Long,
+    override val targetId: Long,
+    override val originalMessage: MessageChain,
+    override val internalIds: IntArray,
 ) : OfflineMessageSource(), MessageSourceInternal {
-    override val kind: Kind = if (delegate.msgHead.groupInfo != null) Kind.GROUP else Kind.FRIEND
-    override val id: Int get() = sequenceId
-    override val internalId: Int
-        get() = delegate.msgHead.msgUid.toInt()
-    override val time: Int
-        get() = delegate.msgHead.msgTime
-    override val fromId: Long
-        get() = delegate.msgHead.fromUin
-    override val targetId: Long
-        get() = delegate.msgHead.groupInfo?.groupCode ?: delegate.msgHead.toUin
-    override val originalMessage: MessageChain by lazy {
-        delegate.toMessageChain(bot,
-            groupIdOrZero = delegate.msgHead.groupInfo?.groupCode ?: 0,
-            onlineSource = false,
-            isTemp = delegate.msgHead.c2cTmpMsgHead != null
-        )
-    }
-    override val sequenceId: Int
-        get() = delegate.msgHead.msgSeq
+    override val sequenceIds: IntArray get() = ids
 
-    override var isRecalledOrPlanned: MiraiAtomicBoolean = MiraiAtomicBoolean(false)
+    @Transient
+    @Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")
+    override var isRecalledOrPlanned: AtomicBoolean = AtomicBoolean(false)
 
     override fun toJceData(): ImMsgBody.SourceMsg {
         return ImMsgBody.SourceMsg(
-            origSeqs = listOf(delegate.msgHead.msgSeq),
-            senderUin = delegate.msgHead.fromUin,
+            origSeqs = sequenceIds,
+            senderUin = fromId,
             toUin = 0,
             flag = 1,
-            elems = delegate.msgBody.richText.elems,
+            elems = originalMessage.toRichTextElems(
+                null, //forGroup = kind == MessageSourceKind.GROUP,
+                withGeneralFlags = false
+            ),
             type = 0,
-            time = delegate.msgHead.msgTime,
+            time = time,
+            pbReserve = net.mamoe.mirai.internal.EMPTY_BYTE_ARRAY,
+            srcMsg = net.mamoe.mirai.internal.EMPTY_BYTE_ARRAY
+        )
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as OfflineMessageSourceImplData
+
+        if (kind != other.kind) return false
+        if (!ids.contentEquals(other.ids)) return false
+        if (botId != other.botId) return false
+        if (time != other.time) return false
+        if (fromId != other.fromId) return false
+        if (targetId != other.targetId) return false
+        if (originalMessage != other.originalMessage) return false
+        if (!internalIds.contentEquals(other.internalIds)) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = kind.hashCode()
+        result = 31 * result + ids.contentHashCode()
+        result = 31 * result + botId.hashCode()
+        result = 31 * result + time
+        result = 31 * result + fromId.hashCode()
+        result = 31 * result + targetId.hashCode()
+        result = 31 * result + originalMessage.hashCode()
+        result = 31 * result + internalIds.contentHashCode()
+        return result
+    }
+}
+
+internal class OfflineMessageSourceImplByMsg(
+    // from other sources' originalMessage
+    val delegate: List<MsgComm.Msg>,
+    override val botId: Long,
+) : OfflineMessageSource(), MessageSourceInternal {
+    override val kind: MessageSourceKind =
+        if (delegate.first().msgHead.groupInfo != null) MessageSourceKind.GROUP else MessageSourceKind.FRIEND
+    override val ids: IntArray get() = sequenceIds
+    override val internalIds: IntArray = delegate.mapToIntArray { it.msgHead.msgUid.toInt() }
+    override val time: Int
+        get() = delegate.first().msgHead.msgTime
+    override val fromId: Long
+        get() = delegate.first().msgHead.fromUin
+    override val targetId: Long
+        get() = delegate.first().msgHead.groupInfo?.groupCode ?: delegate.first().msgHead.toUin
+    override val originalMessage: MessageChain by lazy {
+        delegate.toMessageChain(
+            null,
+            botId,
+            groupIdOrZero = delegate.first().msgHead.groupInfo?.groupCode ?: 0,
+            onlineSource = false,
+            isTemp = delegate.first().msgHead.c2cTmpMsgHead != null
+        )
+    }
+    override val sequenceIds: IntArray = delegate.mapToIntArray { it.msgHead.msgSeq }
+
+    override var isRecalledOrPlanned: AtomicBoolean = AtomicBoolean(false)
+
+    override fun toJceData(): ImMsgBody.SourceMsg {
+        return ImMsgBody.SourceMsg(
+            origSeqs = delegate.mapToIntArray { it.msgHead.msgSeq },
+            senderUin = delegate.first().msgHead.fromUin,
+            toUin = 0,
+            flag = 1,
+            elems = delegate.flatMap { it.msgBody.richText.elems },
+            type = 0,
+            time = delegate.first().msgHead.msgTime,
             pbReserve = EMPTY_BYTE_ARRAY,
             srcMsg = EMPTY_BYTE_ARRAY
         )
@@ -67,26 +135,25 @@ internal class OfflineMessageSourceImplByMsg(
 internal class OfflineMessageSourceImplBySourceMsg(
     // from others' quotation
     val delegate: ImMsgBody.SourceMsg,
-    override val bot: Bot,
+    override val botId: Long,
     groupIdOrZero: Long
 ) : OfflineMessageSource(), MessageSourceInternal {
-    override val kind: Kind get() = if (delegate.srcMsg == null) Kind.GROUP else Kind.FRIEND
+    override val kind: MessageSourceKind get() = if (delegate.srcMsg == null) MessageSourceKind.GROUP else MessageSourceKind.FRIEND
 
-    override var isRecalledOrPlanned: MiraiAtomicBoolean = MiraiAtomicBoolean(false)
-    override val sequenceId: Int
-        get() = delegate.origSeqs.firstOrNull() ?: error("cannot find sequenceId")
-    override val internalId: Int
-        get() = delegate.pbReserve.loadAs(SourceMsg.ResvAttr.serializer()).origUids?.toInt() ?: 0
+    override var isRecalledOrPlanned: AtomicBoolean = AtomicBoolean(false)
+    override val sequenceIds: IntArray = delegate.origSeqs
+    override val internalIds: IntArray = delegate.pbReserve.loadAs(SourceMsg.ResvAttr.serializer())
+        .origUids?.mapToIntArray { it.toInt() } ?: intArrayOf()
     override val time: Int get() = delegate.time
-    override val originalMessage: MessageChain by lazy { delegate.toMessageChain(bot, groupIdOrZero) }
+    override val originalMessage: MessageChain by lazy { delegate.toMessageChain(botId, groupIdOrZero) }
     /*
-    override val id: Long
+    override val ids: Long
         get() = (delegate.origSeqs?.firstOrNull()
             ?: error("cannot find sequenceId from ImMsgBody.SourceMsg")).toLong().shl(32) or
                 delegate.pbReserve.loadAs(SourceMsg.ResvAttr.serializer()).origUids!!.and(0xFFFFFFFF)
     */
 
-    override val id: Int get() = sequenceId
+    override val ids: IntArray get() = sequenceIds
     // delegate.pbReserve.loadAs(SourceMsg.ResvAttr.serializer()).origUids?.toInt()
     // ?: 0
 

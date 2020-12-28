@@ -10,7 +10,8 @@
 package net.mamoe.mirai.message.code
 
 import net.mamoe.mirai.message.data.*
-import net.mamoe.mirai.utils.SinceMirai
+import net.mamoe.mirai.utils.MiraiExperimentalApi
+
 
 /**
  * 可以使用 mirai 码表示的 [Message] 类型.
@@ -18,7 +19,7 @@ import net.mamoe.mirai.utils.SinceMirai
  * 使用 `mirai-serialization` 中 `String.parseMiraiCode()` 转回 [Message].
  *
  * ## 规范
- * 可在 [mirai-code-specification.md](https://github.com/mamoe/mirai/blob/dev/docs/mirai-code-specification.md) 查看 mirai 码规范.
+ * 可在 [MiraiCodeSepecification.md](https://github.com/mamoe/mirai/blob/dev/docs/MiraiCodeSepecification.md) 查看 mirai 码规范.
  *
  * @suppress 警告: 此 API 可能在任何时刻被改变
  *
@@ -30,12 +31,15 @@ import net.mamoe.mirai.utils.SinceMirai
  * @see FlashImage
  * @see PokeMessage
  */
-@SinceMirai("1.1.0")
 public interface CodableMessage : Message {
     /**
      * 转换为 mirai 码.
      *
      * @suppress 警告: 此 API 可能在任何时刻被改变
      */
-    public fun toMiraiCode(): String = this.toString()
+    public fun toMiraiCode(): String = buildString { appendMiraiCode(this) }
+
+    // Using StringBuilder faster than direct plus objects
+    @MiraiExperimentalApi
+    public fun appendMiraiCode(builder: StringBuilder)
 }

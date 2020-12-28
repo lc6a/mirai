@@ -17,7 +17,6 @@ import kotlinx.serialization.protobuf.ProtoNumber
 import kotlinx.serialization.protobuf.ProtoType
 import net.mamoe.mirai.internal.network.protocol.packet.EMPTY_BYTE_ARRAY
 import net.mamoe.mirai.internal.utils.io.ProtoBuf
-import kotlin.jvm.JvmField
 
 @Serializable
 internal class SubMsgType0x43 : ProtoBuf {

@@ -8,8 +8,7 @@
  */
 package net.mamoe.mirai.internal.network.protocol
 
-import net.mamoe.mirai.internal.utils.LinkedList
-import kotlin.jvm.Synchronized
+import java.util.*
 
 internal class SyncingCacheList<E>(private val size: Int = 50) {
     private val packetIdList = LinkedList<E>()
@@ -21,4 +20,19 @@ internal class SyncingCacheList<E>(private val size: Int = 50) {
         if (packetIdList.size >= size) packetIdList.removeFirst()
         return true
     }
+
+    @Synchronized
+    fun removeFirst(condition: (E) -> Boolean): Boolean {
+        val itr = packetIdList.listIterator()
+        for (element in itr) {
+            if (element.let(condition)) {
+                itr.remove()
+                return true
+            }
+        }
+        return false
+    }
+
+    @Synchronized
+    fun contains(condition: (E) -> Boolean): Boolean = packetIdList.any(condition)
 }

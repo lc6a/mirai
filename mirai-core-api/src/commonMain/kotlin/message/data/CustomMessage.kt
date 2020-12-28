@@ -17,10 +17,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import kotlinx.serialization.protobuf.ProtoNumber
+import net.mamoe.mirai.message.MessageSerializer
 import net.mamoe.mirai.utils.*
-import net.mamoe.mirai.utils.internal.checkOffsetAndLength
-import kotlin.jvm.JvmOverloads
-
 
 /**
  * 自定义消息
@@ -28,12 +26,17 @@ import kotlin.jvm.JvmOverloads
  * 它不会显示在消息文本中, 也不会被其他客户端识别.
  * 只有 mirai 才能识别这些消息.
  *
- * 目前在回复时无法通过 [originalMessage] 获取自定义类型消息
+ * 目前在回复时无法通过 [MessageSource.originalMessage] 获取自定义类型消息
+ *
+ * ## 序列化
+ * 若要支持序列化, 需 [MessageSerializer.registerSerializer]
  *
  * @sample samples.CustomMessageIdentifier 实现示例
  *
  * @see CustomMessageMetadata 自定义消息元数据
+ * @see MessageSerializer
  */
+@Serializable
 @MiraiExperimentalApi
 public sealed class CustomMessage : SingleMessage {
     /**
@@ -55,8 +58,8 @@ public sealed class CustomMessage : SingleMessage {
          * 在发往服务器时使用此名称.
          * 应确保唯一且不变.
          */
-        public final override val typeName: String
-    ) : Message.Key<M> {
+        public val typeName: String
+    ) {
 
         init {
             @Suppress("LeakingThis")
@@ -110,8 +113,7 @@ public sealed class CustomMessage : SingleMessage {
         public override fun load(input: ByteArray): M = json.decodeFromString(serializer(), String(input))
     }
 
-    public companion object Key : Message.Key<CustomMessage> {
-        override val typeName: String get() = "CustomMessage"
+    public companion object {
         private val factories: LockFreeLinkedList<Factory<*>> = LockFreeLinkedList()
 
         internal fun register(factory: Factory<out CustomMessage>) {
@@ -134,7 +136,8 @@ public sealed class CustomMessage : SingleMessage {
         public class CustomMessageFullDataDeserializeUserException(public val body: ByteArray, cause: Throwable?) :
             RuntimeException(cause)
 
-        internal fun load(fullData: ByteReadPacket): CustomMessage? {
+        @MiraiInternalApi
+        public fun load(fullData: ByteReadPacket): CustomMessage? {
             val msg = kotlin.runCatching {
                 val length = fullData.readInt()
                 if (fullData.remaining != length.toLong()) {
@@ -154,7 +157,8 @@ public sealed class CustomMessage : SingleMessage {
             }
         }
 
-        internal fun <M : CustomMessage> dump(factory: Factory<M>, message: M): ByteArray = buildPacket {
+        @MiraiInternalApi
+        public fun <M : CustomMessage> dump(factory: Factory<M>, message: M): ByteArray = buildPacket {
             ProtoBuf.encodeToByteArray(
                 CustomMessageFullData.serializer(), CustomMessageFullData(
                     miraiVersionFlag = 1,
@@ -173,7 +177,6 @@ public sealed class CustomMessage : SingleMessage {
  * 序列化这个消息
  */
 @MiraiExperimentalApi
-@SinceMirai("1.1.0")
 public fun <T : CustomMessage> T.toByteArray(): ByteArray {
     @Suppress("UNCHECKED_CAST")
     return (this.getFactory() as CustomMessage.Factory<T>).dump(this)
@@ -190,16 +193,15 @@ public fun <T : CustomMessage> T.toByteArray(): ByteArray {
  * @see CustomMessage 查看更多信息
  * @see ConstrainSingle 可实现此接口以保证消息链中只存在一个元素
  */
+@Serializable
 @MiraiExperimentalApi
 public abstract class CustomMessageMetadata : CustomMessage(), MessageMetadata {
-    public companion object Key : Message.Key<CustomMessageMetadata> {
-        override val typeName: String get() = "CustomMessageMetadata"
-    }
-
     public open fun customToString(): ByteArray = customToStringImpl(this.getFactory())
 
     final override fun toString(): String =
         "[mirai:custom:${getFactory().typeName}:${String(customToString())}]"
+
+    public companion object
 }
 
 
@@ -207,29 +209,4 @@ public abstract class CustomMessageMetadata : CustomMessage(), MessageMetadata {
 internal inline fun <T : CustomMessageMetadata> T.customToStringImpl(factory: CustomMessage.Factory<*>): ByteArray {
     @Suppress("UNCHECKED_CAST")
     return (factory as CustomMessage.Factory<T>).dump(this)
-}
-
-@OptIn(ExperimentalUnsignedTypes::class)
-@JvmOverloads
-@Suppress("DuplicatedCode") // false positive. foreach is not common to UByteArray and ByteArray
-internal fun ByteArray.toUHexString(
-    separator: String = " ",
-    offset: Int = 0,
-    length: Int = this.size - offset
-): String {
-    this.checkOffsetAndLength(offset, length)
-    if (length == 0) {
-        return ""
-    }
-    val lastIndex = offset + length
-    return buildString(length * 2) {
-        this@toUHexString.forEachIndexed { index, it ->
-            if (index in offset until lastIndex) {
-                var ret = it.toUByte().toString(16).toUpperCase()
-                if (ret.length == 1) ret = "0$ret"
-                append(ret)
-                if (index < lastIndex - 1) append(separator)
-            }
-        }
-    }
 }
